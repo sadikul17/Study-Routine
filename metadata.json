@@ -1,0 +1,5 @@
+{
+  "name": "Study Routine",
+  "description": "A professional minimalist study planner with Supabase authentication, persistent data storage, and advanced sync features.",
+  "requestFramePermissions": ["microphone"]
+}

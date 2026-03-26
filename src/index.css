@@ -1,0 +1,212 @@
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+html {
+  scroll-behavior: smooth;
+}
+
+@theme {
+  --color-background: #0A0E14;
+  --color-primary: #5856D6;
+  --color-card: #161B22;
+  --color-input: #21262D;
+  --color-danger: #F85149;
+  
+  --radius-card: 24px;
+  --radius-input: 12px;
+
+  --font-sans: "Hind Siliguri", "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+.light {
+  --color-background: #F8F9FA;
+  --color-primary: #5856D6;
+  --color-card: #FFFFFF;
+  --color-input: #FFFFFF;
+  --color-danger: #FF3B30;
+  
+  color: #1A1A1A;
+}
+
+/* Base text color for light mode */
+.light body {
+  color: #1A1A1A;
+}
+
+/* Ensure text-white only changes to black when it's NOT on a primary background */
+.light .text-white:not(.bg-primary *):not(.bg-danger *):not(.bg-emerald-500 *):not(.bg-orange-500 *) {
+  color: #1A1A1A;
+}
+
+/* Keep white text on primary/danger/success backgrounds */
+.light .bg-primary .text-white,
+.light .bg-danger .text-white,
+.light .bg-emerald-500 .text-white,
+.light .bg-orange-500 .text-white,
+.light .bg-primary.text-white,
+.light .bg-danger.text-white {
+  color: #FFFFFF !important;
+}
+
+.light .text-gray-400 {
+  color: #6C757D;
+}
+
+.light .text-gray-500 {
+  color: #495057;
+}
+
+.light .bg-card {
+  background-color: #FFFFFF;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+}
+
+.light .bg-background {
+  background-color: #F8F9FA;
+}
+
+.light .border-white\/5 {
+  border-color: rgba(0,0,0,0.08);
+}
+
+.light .border-white\/10 {
+  border-color: rgba(0,0,0,0.12);
+}
+
+.light .bg-white\/5 {
+  background-color: rgba(0,0,0,0.03);
+}
+
+.light .bg-white\/10 {
+  background-color: rgba(0,0,0,0.06);
+}
+
+.light .bg-input {
+  background-color: #FFFFFF;
+  border: 1px solid rgba(0,0,0,0.1);
+}
+
+.light .bg-\[\#1C222D\] {
+  background-color: #F1F3F5;
+  border: 1px solid rgba(0,0,0,0.05);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+  color: #1A1A1A;
+}
+
+.light .bg-\[\#1C222D\] svg {
+  color: #495057;
+}
+
+.light .bg-\[\#1C222D\]:hover svg {
+  color: var(--color-primary);
+}
+
+.light .bg-\[\#0A0E14\]\/90 {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+
+/* Fix for badges in light mode */
+.light .bg-\[\#2D1B16\] {
+  background-color: #FFF0EB;
+}
+.light .text-\[\#FF7D52\] {
+  color: #44403e;
+}
+
+.light .bg-\[\#162D1E\] {
+  background-color: #E6FFED;
+}
+.light .text-\[\#52FF8C\] {
+  color: #28A745;
+}
+
+.light .dashed-border {
+  background-image: url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='40' ry='40' stroke='%23CED4DA' stroke-width='2' stroke-dasharray='8%2c 8' stroke-dashoffset='0' stroke-linecap='square'/%3e%3c/svg%3e");
+}
+
+@layer base {
+  html, body, #root {
+    height: 100dvh;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    background-color: #0A0E14;
+    border: none !important;
+    outline: none !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  
+  /* Hide scrollbar for all elements */
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+    border-right-color: transparent;
+    /* Hardware acceleration for all elements to ensure smooth scrolling */
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+  
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  body {
+    @apply bg-background text-white font-sans antialiased;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: none;
+    touch-action: auto;
+    border: none !important;
+    outline: none !important;
+    /* Enable GPU acceleration for the whole body */
+    transform: translate3d(0,0,0);
+  }
+}
+
+/* Safe area utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-safe {
+  bottom: env(safe-area-inset-bottom);
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-hide {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+}
+
+.dashed-border {
+  background-image: url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='40' ry='40' stroke='%231C222D' stroke-width='2' stroke-dasharray='8%2c 8' stroke-dashoffset='0' stroke-linecap='square'/%3e%3c/svg%3e");
+}

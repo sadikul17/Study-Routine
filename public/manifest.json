@@ -1,0 +1,23 @@
+{
+  "name": "Study Routine",
+  "short_name": "Study Routine",
+  "description": "A powerful study routine and session tracker.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0E14",
+  "theme_color": "#0A0E14",
+  "icons": [
+    {
+      "src": "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
