@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
 import { 
   Home as HomeIcon, 
   BarChart2, 
@@ -40,7 +40,8 @@ import {
   History,
   Archive,
   Bell,
-  Clock
+  Clock,
+  AlarmClock
 } from 'lucide-react';
 import { 
   format, 
@@ -199,7 +200,7 @@ const RoutineCard = ({
       <div className="flex flex-row sm:flex-col gap-3 items-center sm:items-end mt-4 sm:mt-0 sm:ml-6 w-full sm:w-auto justify-between sm:justify-center border-t sm:border-t-0 pt-4 sm:pt-0 border-slate-100 dark:border-slate-700">
         {view === 'active' && (
           <button
-            onClick={() => onAddTask(routine.subject, routine.chapter, routine.topics || '', routine.date, routine.reminder_time)}
+            onClick={() => onAddTask(routine.subject, routine.chapter, routine.topics || '', routine.date, routine.end_date, routine.reminder_time)}
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all border active:scale-95",
               darkMode 
@@ -237,7 +238,7 @@ const RoutineCard = ({
                       const today = new Date();
                       onSaveRoutine({
                         ...routine,
-                        end_date: format(subDays(today, 16), 'yyyy-MM-dd')
+                        end_date: format(subDays(today, 1), 'yyyy-MM-dd')
                       });
                     }
                   }}
@@ -294,7 +295,7 @@ const RoutinePage = ({
   onDeleteRoutine: (id: string) => Promise<void>,
   onRestoreRoutine: (id: string) => Promise<void>,
   onPermanentlyDeleteRoutine: (id: string) => Promise<void>,
-  onAddTask: (subject: string, chapter: string, topics: string, date: string, reminder_time?: string) => Promise<void>,
+  onAddTask: (subject: string, chapter: string, topics: string, date: string, end_date?: string, reminder_time?: string) => Promise<void>,
   user: any,
   darkMode: boolean
 }) => {
@@ -320,8 +321,8 @@ const RoutinePage = ({
     if (!r.end_date) return true;
     const today = startOfDay(new Date());
     const end = startOfDay(new Date(r.end_date));
-    // Stay in active for 15 days after it ends
-    return differenceInDays(today, end) <= 15;
+    // Stay in active until it ends
+    return differenceInDays(today, end) <= 0;
   }), [routines]);
 
   const endedRoutines = useMemo(() => routines.filter(r => {
@@ -329,8 +330,8 @@ const RoutinePage = ({
     if (!r.end_date) return false;
     const today = startOfDay(new Date());
     const end = startOfDay(new Date(r.end_date));
-    // Move to ended after 15 days
-    return differenceInDays(today, end) > 15;
+    // Move to ended after it ends
+    return differenceInDays(today, end) > 0;
   }), [routines]);
 
   const deletedRoutines = useMemo(() => routines.filter(r => !!r.deleted_at), [routines]);
@@ -1295,6 +1296,7 @@ export default function App() {
   const [isGeneratingHomePDF, setIsGeneratingHomePDF] = useState(false);
   const [showHomePrintOptions, setShowHomePrintOptions] = useState(false);
   const [homePrintDays, setHomePrintDays] = useState('7');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 
   const lastSupabaseSaveRef = useRef<number>(0);
 
@@ -1498,9 +1500,9 @@ export default function App() {
     setActiveTab('home');
   };
 
-  // Auto-sync twice a day (at 6:00 AM and 6:00 PM)
+  // Auto-sync every hour
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.id === 'guest_user') return;
 
     const checkSync = () => {
       const now = new Date();
@@ -1509,27 +1511,22 @@ export default function App() {
       const lastSyncKey = `last_auto_sync_${user.id}`;
       const lastSyncData = safeParse(localStorage.getItem(lastSyncKey), { date: '', hours: [] });
 
-      // Sync at 6 AM or 6 PM
-      const targetHours = [6, 18];
-      const currentTargetHour = targetHours.find(h => currentHour === h);
-
-      if (currentTargetHour !== undefined) {
-        const alreadySyncedThisHour = lastSyncData.date === today && lastSyncData.hours.includes(currentTargetHour);
-        
-        if (!alreadySyncedThisHour) {
-          console.log(`Auto-sync triggered at ${currentTargetHour}:00`);
-          storage.fullSync(user.id).then(() => {
-            const updatedSyncData = {
-              date: today,
-              hours: lastSyncData.date === today ? [...lastSyncData.hours, currentTargetHour] : [currentTargetHour]
-            };
-            localStorage.setItem(lastSyncKey, JSON.stringify(updatedSyncData));
-          });
-        }
+      // Sync every hour
+      const alreadySyncedThisHour = lastSyncData.date === today && lastSyncData.hours.includes(currentHour);
+      
+      if (!alreadySyncedThisHour) {
+        console.log(`Auto-sync triggered at ${currentHour}:00`);
+        storage.fullSync(user.id).then(() => {
+          const updatedSyncData = {
+            date: today,
+            hours: lastSyncData.date === today ? [...lastSyncData.hours, currentHour] : [currentHour]
+          };
+          localStorage.setItem(lastSyncKey, JSON.stringify(updatedSyncData));
+        }).catch(err => console.warn('Auto-sync failed:', err));
       }
     };
 
-    const interval = setInterval(checkSync, 60000); // Check every minute
+    const interval = setInterval(checkSync, 60000 * 5); // Check every 5 minutes
     checkSync(); // Initial check
 
     return () => clearInterval(interval);
@@ -1558,7 +1555,33 @@ export default function App() {
       }
       setIsLoading(true);
       
-      // Create a timeout promise and a way to clear it
+      // 1. Load from local cache immediately for fast UI
+      try {
+        const cachedSessions = localStorage.getItem(`cached_sessions_${user.id}`);
+        const cachedTrash = localStorage.getItem(`cached_trash_${user.id}`);
+        const cachedSettings = localStorage.getItem(`cached_settings_${user.id}`);
+        const cachedProfile = localStorage.getItem(`cached_profile_${user.id}`);
+        const cachedTimer = localStorage.getItem(`cached_timer_${user.id}`);
+        const cachedRoutines = localStorage.getItem(`cached_routines_${user.id}`);
+
+        if (cachedSessions) setSessions(JSON.parse(cachedSessions));
+        if (cachedTrash) setTrash(JSON.parse(cachedTrash));
+        if (cachedSettings) setSettings(JSON.parse(cachedSettings));
+        if (cachedProfile) setProfile(JSON.parse(cachedProfile));
+        if (cachedRoutines) setRoutines(JSON.parse(cachedRoutines));
+        
+        if (cachedTimer) {
+          const timerData = JSON.parse(cachedTimer);
+          setTimerTotalSeconds(timerData.total_seconds);
+          setTimerInitialMinutes(Math.floor(timerData.total_seconds / 60));
+          setTimerTimeLeft(timerData.time_left);
+          setIsTimerActive(false);
+        }
+      } catch (e) {
+        console.warn('Error loading initial cached data:', e);
+      }
+
+      // 2. Then, fetch from Supabase in the background
       let timeoutId: any = null;
       
       try {
@@ -1579,7 +1602,8 @@ export default function App() {
           storage.getTrash(user.id),
           storage.getSettings(user.id),
           storage.getProfile(user.id),
-          storage.getTimer(user.id)
+          storage.getTimer(user.id),
+          storage.getRoutines(user.id)
         ]);
 
         // Race the data fetch against the timeout
@@ -1591,12 +1615,13 @@ export default function App() {
         // Clear the timeout if dataPromise wins
         if (timeoutId) clearTimeout(timeoutId);
 
-        const [sessionsData, trashData, settingsData, profileData, timerData] = result as [StudySession[], StudySession[], AppSettings, UserProfile, TimerState | null];
+        const [sessionsData, trashData, settingsData, profileData, timerData, routinesData] = result as [StudySession[], StudySession[], AppSettings, UserProfile, TimerState | null, RoutineItem[]];
 
         setSessions(sessionsData);
         setTrash(trashData);
         setSettings(settingsData);
         setProfile(profileData);
+        setRoutines(routinesData);
 
         if (timerData) {
           setTimerTotalSeconds(timerData.total_seconds);
@@ -1616,32 +1641,6 @@ export default function App() {
       } catch (error) {
         console.warn('Error loading data from Supabase:', error);
         if (timeoutId) clearTimeout(timeoutId);
-        
-        // Fallback to cache if Supabase fails or times out
-        try {
-          const cachedSessions = localStorage.getItem(`cached_sessions_${user.id}`);
-          const cachedTrash = localStorage.getItem(`cached_trash_${user.id}`);
-          const cachedSettings = localStorage.getItem(`cached_settings_${user.id}`);
-          const cachedProfile = localStorage.getItem(`cached_profile_${user.id}`);
-          const cachedTimer = localStorage.getItem(`cached_timer_${user.id}`);
-          const cachedRoutines = localStorage.getItem(`cached_routines_${user.id}`);
-
-          if (cachedSessions) setSessions(JSON.parse(cachedSessions));
-          if (cachedTrash) setTrash(JSON.parse(cachedTrash));
-          if (cachedSettings) setSettings(JSON.parse(cachedSettings));
-          if (cachedProfile) setProfile(JSON.parse(cachedProfile));
-          if (cachedRoutines) setRoutines(JSON.parse(cachedRoutines));
-          
-          if (cachedTimer) {
-            const timerData = JSON.parse(cachedTimer);
-            setTimerTotalSeconds(timerData.total_seconds);
-            setTimerInitialMinutes(Math.floor(timerData.total_seconds / 60));
-            setTimerTimeLeft(timerData.time_left);
-            setIsTimerActive(false);
-          }
-        } catch (e) {
-          console.warn('Error parsing cached data in fallback:', e);
-        }
       } finally {
         setIsLoading(false);
       }
@@ -1727,39 +1726,39 @@ export default function App() {
   };
 
   const handleAddSession = async (newSession: Omit<StudySession, 'id' | 'date' | 'completed' | 'user_id'>) => {
-    console.log('handleAddSession called with:', newSession);
-    if (!newSession.subject || !newSession.chapter) {
-      console.warn('Missing subject or chapter in handleAddSession');
-      return;
-    }
-    if (!user) {
-      console.warn('No user found in handleAddSession');
-      return;
-    }
+    if (!newSession.subject || !newSession.chapter) return;
+    if (!user) return;
     
     try {
-      // Fallback for UUID generation
-      const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
-        ? crypto.randomUUID() 
-        : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      if (editingSessionId) {
+        const existingSession = sessions.find(s => s.id === editingSessionId);
+        if (existingSession) {
+          const updatedSession: StudySession = {
+            ...existingSession,
+            ...newSession,
+          };
+          await storage.saveSession(user.id, updatedSession);
+        }
+      } else {
+        const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
+          ? crypto.randomUUID() 
+          : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
-      const session: StudySession = {
-        ...newSession,
-        id: sessionId,
-        user_id: user.id,
-        date: format(selectedDate, 'yyyy-MM-dd'),
-        completed: false
-      };
+        const session: StudySession = {
+          ...newSession,
+          id: sessionId,
+          user_id: user.id,
+          date: format(selectedDate, 'yyyy-MM-dd'),
+          completed: false
+        };
+        await storage.saveSession(user.id, session);
+      }
       
-      console.log('Saving session to storage:', session);
-      await storage.saveSession(user.id, session);
-      console.log('Session saved, refreshing data...');
       await refreshData(user.id);
       setIsModalOpen(false);
-      console.log('Modal closed');
+      setEditingSessionId(null);
     } catch (error) {
-      console.warn('Error adding session to Supabase:', error);
-      // You could add a toast notification here if you have one
+      console.warn('Error saving session:', error);
     }
   };
 
@@ -2382,6 +2381,10 @@ export default function App() {
                                 index={index}
                                 onToggle={() => toggleComplete(s.id)}
                                 onDelete={() => setTaskToDelete(s.id)}
+                                onEdit={() => {
+                                  setEditingSessionId(s.id);
+                                  setIsModalOpen(true);
+                                }}
                                 onClick={() => setExpandedTaskId(expandedTaskId === s.id ? null : s.id)}
                                 isExpanded={expandedTaskId === s.id || (expandedTaskId === null && index === 0)}
                               />
@@ -2423,6 +2426,10 @@ export default function App() {
                               index={index}
                               onToggle={() => toggleComplete(s.id)}
                               onDelete={() => setTaskToDelete(s.id)}
+                              onEdit={() => {
+                                setEditingSessionId(s.id);
+                                setIsModalOpen(true);
+                              }}
                               onClick={() => setExpandedTaskId(expandedTaskId === s.id ? null : s.id)}
                               isExpanded={expandedTaskId === s.id}
                             />
@@ -2470,26 +2477,39 @@ export default function App() {
                       await refreshData(user.id);
                     }
                   }}
-                  onAddTask={async (subject, chapter, topics, date, reminder_time) => {
+                  onAddTask={async (subject, chapter, topics, date, end_date, reminder_time) => {
                     if (user) {
-                      const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
-                        ? crypto.randomUUID() 
-                        : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-
-                      const session: StudySession = {
-                        id: sessionId,
-                        user_id: user.id,
-                        subject,
-                        chapter,
-                        topics,
-                        color: '#5856D6',
-                        icon: 'Book',
-                        date,
-                        completed: false,
-                        reminder_time
-                      };
+                      const start = startOfDay(new Date(date));
+                      const end = end_date ? startOfDay(new Date(end_date)) : start;
+                      const diff = differenceInDays(end, start);
+                      const daysCount = diff >= 0 ? diff + 1 : 1;
                       
-                      await storage.saveSession(user.id, session);
+                      const sessionsToSave: StudySession[] = [];
+                      
+                      for (let i = 0; i < daysCount; i++) {
+                        const currentDate = addDays(start, i);
+                        const dateStr = format(currentDate, 'yyyy-MM-dd');
+                        
+                        const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
+                          ? crypto.randomUUID() 
+                          : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+                        const session: StudySession = {
+                          id: sessionId,
+                          user_id: user.id,
+                          subject,
+                          chapter,
+                          topics,
+                          color: '#5856D6',
+                          icon: 'Book',
+                          date: dateStr,
+                          completed: false,
+                          reminder_time
+                        };
+                        sessionsToSave.push(session);
+                      }
+                      
+                      await Promise.all(sessionsToSave.map(s => storage.saveSession(user.id, s)));
                       await refreshData(user.id);
                       setActiveTab('home');
                     }
@@ -2874,7 +2894,31 @@ export default function App() {
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
+                                  <Bell size={20} />
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-foreground">Notification Panel</span>
+                                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Smart Reminders</span>
+                                </div>
+                              </div>
+                              <div 
+                                onClick={() => setSettings(s => ({ ...s, notifications: !s.notifications }))}
+                                className={cn(
+                                  "w-12 h-6 rounded-full relative p-1 cursor-pointer transition-colors",
+                                  settings.notifications ? "bg-primary" : "bg-gray-300"
+                                )}
+                              >
+                                <motion.div 
+                                  animate={{ x: settings.notifications ? 24 : 0 }}
+                                  className="w-4 h-4 bg-white rounded-full shadow-sm" 
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-4 border-t border-white/5">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
                                   <RefreshCw size={20} className={isSyncing ? "animate-spin" : ""} />
@@ -2898,33 +2942,6 @@ export default function App() {
                               </button>
                             </div>
 
-                            <div className="flex flex-col space-y-4 pt-4 border-t border-white/5">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
-                                    <Bell size={20} />
-                                  </div>
-                                  <div className="flex flex-col">
-                                    <span className="font-bold text-foreground">Notifications</span>
-                                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Smart Reminders</span>
-                                  </div>
-                                </div>
-                                <div 
-                                  onClick={() => setSettings(s => ({ ...s, notifications: !s.notifications }))}
-                                  className={cn(
-                                    "w-12 h-6 rounded-full relative p-1 cursor-pointer transition-colors",
-                                    settings.notifications ? "bg-primary" : "bg-gray-300"
-                                  )}
-                                >
-                                  <motion.div 
-                                    animate={{ x: settings.notifications ? 24 : 0 }}
-                                    className="w-4 h-4 bg-white rounded-full shadow-sm" 
-                                  />
-                                </div>
-                              </div>
-
-
-                            </div>
 
                             <div className="flex items-center justify-between pt-4 border-t border-white/5">
                               <div className="flex items-center gap-3">
@@ -3302,13 +3319,18 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               className="relative w-full max-w-md bg-card rounded-[32px] p-6 md:p-8 space-y-6 shadow-2xl border border-white/10 max-h-[90vh] overflow-y-auto scrollbar-hide"
             >
-              <div className="flex justify-end items-center">
-                <button onClick={() => setIsModalOpen(false)} className="p-2 text-gray-400 hover:text-white transition-colors">
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-bold">{editingSessionId ? 'Edit Task' : 'Add Task'}</h2>
+                <button onClick={() => { setIsModalOpen(false); setEditingSessionId(null); }} className="p-2 text-gray-400 hover:text-white transition-colors">
                   <X size={24} />
                 </button>
               </div>
 
-              <SessionForm onSubmit={handleAddSession} darkMode={settings.dark_mode} />
+              <SessionForm 
+                onSubmit={handleAddSession} 
+                darkMode={settings.dark_mode} 
+                initialData={editingSessionId ? sessions.find(s => s.id === editingSessionId) : null}
+              />
             </motion.div>
           </div>
         )}
@@ -3618,27 +3640,32 @@ function StatCard({ icon, label, value, color, onClick }: { icon: React.ReactNod
   );
 }
 
-const TaskItem = React.memo(({ session, onToggle, onDelete, onClick, isExpanded, dragControls }: { session: StudySession; onToggle: () => void; onDelete: () => void; onClick: () => void; isExpanded: boolean; dragControls: any }) => {
+const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isExpanded, dragControls }: { session: StudySession; onToggle: () => void; onDelete: () => void; onEdit: () => void; onClick: () => void; isExpanded: boolean; dragControls: any }) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const deleteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isHolding, setIsHolding] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     // Only handle left clicks or touches
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    
+    // Prevent the event from bubbling up to the card's delete timer
+    e.stopPropagation();
     
     // Clear any existing timer
     if (timerRef.current) clearTimeout(timerRef.current);
     
     setIsHolding(true);
     
-    // Start a 1-second timer
+    // Start a 0.5-second timer
     timerRef.current = setTimeout(() => {
       // Start the drag
       dragControls.start(e);
       setIsHolding(false);
       // Optional: vibrate to signal drag started
       if ('vibrate' in navigator) navigator.vibrate(50);
-    }, 1000);
+    }, 500);
   };
 
   const handlePointerUp = () => {
@@ -3649,13 +3676,43 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onClick, isExpanded,
     setIsHolding(false);
   };
 
+  const handleBoxPointerDown = (e: React.PointerEvent) => {
+    // Only handle left clicks or touches
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    
+    // Clear any existing delete timer
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    
+    setIsDeleting(true);
+    
+    // Start a 1-second timer for delete
+    deleteTimerRef.current = setTimeout(() => {
+      onDelete();
+      setIsDeleting(false);
+      if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
+    }, 1000);
+  };
+
+  const handleBoxPointerUp = () => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setIsDeleting(false);
+  };
+
   return (
     <motion.div 
       onClick={onClick}
+      onPointerDown={handleBoxPointerDown}
+      onPointerUp={handleBoxPointerUp}
+      onPointerLeave={handleBoxPointerUp}
+      onPointerCancel={handleBoxPointerUp}
       className={cn(
-        "group flex flex-col gap-4 p-4 rounded-2xl transition-all cursor-pointer select-none",
+        "group flex flex-col gap-4 p-4 rounded-2xl transition-all cursor-pointer select-none relative",
         "will-change-transform", // GPU acceleration hint
         session.completed ? "bg-white/5 opacity-60" : "bg-card shadow-sm",
+        isDeleting && "scale-[0.98] opacity-80"
       )}
       style={{ 
         transform: 'translateZ(0)' // Force GPU layer
@@ -3680,7 +3737,16 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onClick, isExpanded,
           </div>
           <p className="text-xs text-gray-500 truncate">{session.chapter}</p>
         </div>
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            className="p-2 text-gray-400 hover:text-primary transition-colors"
+          >
+            <Edit size={18} />
+          </button>
           <motion.div 
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
@@ -3699,7 +3765,7 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onClick, isExpanded,
               <motion.div 
                 initial={{ scale: 0, opacity: 0.8 }}
                 animate={{ scale: 1.2, opacity: 0 }}
-                transition={{ duration: 1, ease: "easeOut" }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
                 className="absolute inset-0 rounded-xl border-2 border-primary pointer-events-none"
               />
             )}
@@ -3722,13 +3788,6 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onClick, isExpanded,
                   {session.topics || 'No topics specified'}
                 </p>
               </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                className="p-2 text-danger hover:bg-danger/10 rounded-xl transition-colors shrink-0"
-                title="Delete Task"
-              >
-                <Trash2 size={18} />
-              </button>
             </div>
           </motion.div>
         )}
@@ -3737,7 +3796,7 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onClick, isExpanded,
   );
 });
 
-const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onClick, isExpanded }: any) => {
+const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onEdit, onClick, isExpanded }: any) => {
   const dragControls = useDragControls();
   return (
     <Reorder.Item 
@@ -3761,6 +3820,7 @@ const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onClick, isExpanded
         session={s} 
         onToggle={onToggle} 
         onDelete={onDelete} 
+        onEdit={onEdit}
         onClick={onClick}
         isExpanded={isExpanded}
         dragControls={dragControls}
@@ -3769,13 +3829,31 @@ const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onClick, isExpanded
   );
 };
 
-function SessionForm({ onSubmit, darkMode }: { onSubmit: (data: any) => void; darkMode: boolean }) {
-  const [subject, setSubject] = useState('');
-  const [chapter, setChapter] = useState('');
-  const [topics, setTopics] = useState('');
-  const [reminderTime, setReminderTime] = useState('');
-  const [selectedColor, setSelectedColor] = useState('#5856D6');
-  const [selectedIcon, setSelectedIcon] = useState('Book');
+const SessionForm = ({ onSubmit, darkMode, initialData }: { onSubmit: (data: any) => void; darkMode: boolean; initialData?: StudySession | null }) => {
+  const [subject, setSubject] = useState(initialData?.subject || '');
+  const [chapter, setChapter] = useState(initialData?.chapter || '');
+  const [topics, setTopics] = useState(initialData?.topics || '');
+  const [reminderTime, setReminderTime] = useState(initialData?.reminder_time || '');
+  const [selectedColor, setSelectedColor] = useState(initialData?.color || '#5856D6');
+  const [selectedIcon, setSelectedIcon] = useState(initialData?.icon || 'Book');
+
+  useEffect(() => {
+    if (initialData) {
+      setSubject(initialData.subject);
+      setChapter(initialData.chapter);
+      setTopics(initialData.topics || '');
+      setReminderTime(initialData.reminder_time || '');
+      setSelectedColor(initialData.color);
+      setSelectedIcon(initialData.icon);
+    } else {
+      setSubject('');
+      setChapter('');
+      setTopics('');
+      setReminderTime('');
+      setSelectedColor('#5856D6');
+      setSelectedIcon('Book');
+    }
+  }, [initialData]);
 
   const colors = ['#5856D6', '#FF2D55', '#FF9500', '#34C759', '#007AFF', '#AF52DE', '#FF3B30'];
   const icons = ['Book', 'Music', 'Heart', 'Brain', 'Zap', 'Atom', 'Calculator', 'Activity'];
@@ -3863,20 +3941,22 @@ function SessionForm({ onSubmit, darkMode }: { onSubmit: (data: any) => void; da
                 icon: selectedIcon,
                 reminder_time: reminderTime || undefined
               });
-              setSubject('');
-              setChapter('');
-              setTopics('');
-              setReminderTime('');
+              if (!initialData) {
+                setSubject('');
+                setChapter('');
+                setTopics('');
+                setReminderTime('');
+              }
             }}
             className="flex-1 py-4 bg-primary rounded-2xl font-bold text-sm tracking-widest hover:opacity-90 transition-opacity text-white"
           >
-            Add to Study Plan
+            {initialData ? 'Update Task' : 'Add to Study Plan'}
           </button>
         </div>
       </div>
     </div>
   );
-}
+};
 
 function IconRenderer({ name, size }: { name: string; size: number }) {
   const icons: Record<string, any> = { Book, Music, Heart, Brain, Zap, Atom, Calculator, Activity };

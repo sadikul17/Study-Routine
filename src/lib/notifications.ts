@@ -52,7 +52,7 @@ export const notificationService = {
     // Common notification properties for professional look
     const commonProps = {
       smallIcon: 'ic_launcher', // Use the main app icon for notifications
-      iconColor: '#FF4444', // Professional red
+      iconColor: '#1E88E5', // Professional blue to match logo
       channelId: 'study_reminders',
       sound: settings.sound ? 'default' : undefined,
     };
@@ -73,10 +73,10 @@ export const notificationService = {
         title: 'Task Reminder',
         body: `You have ${pendingTasks.length} pending tasks for today. Don't forget to complete them!`,
         id: 1,
-        schedule: { at: scheduleDate, repeats: true, every: 'day' },
+        schedule: { at: scheduleDate, repeats: true, every: 'day', allowWhileIdle: true },
         extra: { type: 'tasks' },
         group: 'tasks',
-        threadId: 'tasks'
+        threadId: 'tasks',
       });
     }
 
@@ -93,13 +93,13 @@ export const notificationService = {
 
       notifications.push({
         ...commonProps,
-        title: 'Routine Reminder',
+        title: 'Task Reminder',
         body: `Time to check your study routines! You have ${activeRoutines.length} active routines.`,
         id: 2,
-        schedule: { at: scheduleDate, repeats: true, every: 'day' },
+        schedule: { at: scheduleDate, repeats: true, every: 'day', allowWhileIdle: true },
         extra: { type: 'routines' },
         group: 'routines',
-        threadId: 'routines'
+        threadId: 'routines',
       });
     }
 
@@ -112,13 +112,13 @@ export const notificationService = {
       if (taskDate > new Date()) {
         notifications.push({
           ...commonProps,
-          title: 'Task Reminder: ' + s.subject,
-          body: `Time for your task: ${s.chapter}. Stay focused!`,
+          title: 'Task Reminder',
+          body: `Subject : ${s.subject}\nchapter : ${s.chapter}`,
           id: Math.abs(this.hashCode(s.id)),
-          schedule: { at: taskDate },
+          schedule: { at: taskDate, allowWhileIdle: true },
           extra: { type: 'specific_task', id: s.id },
           group: 'specific_tasks',
-          threadId: 'specific_tasks'
+          threadId: 'specific_tasks',
         });
       }
     });
@@ -132,13 +132,13 @@ export const notificationService = {
       if (routineDate > new Date()) {
         notifications.push({
           ...commonProps,
-          title: 'Routine Reminder: ' + r.subject,
-          body: `Time for your routine: ${r.chapter}. Keep it up!`,
+          title: 'Task Reminder',
+          body: `Subject : ${r.subject}\nchapter : ${r.chapter}`,
           id: Math.abs(this.hashCode(r.id)),
-          schedule: { at: routineDate },
+          schedule: { at: routineDate, allowWhileIdle: true },
           extra: { type: 'specific_routine', id: r.id },
           group: 'specific_routines',
-          threadId: 'specific_routines'
+          threadId: 'specific_routines',
         });
       }
     });
@@ -161,5 +161,35 @@ export const notificationService = {
       hash = hash & hash; // Convert to 32bit integer
     }
     return hash;
+  },
+
+  async setQuickAlarm(time: string, subject: string, chapter: string) {
+    if (!time) return;
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const scheduleDate = new Date();
+    scheduleDate.setHours(hours, minutes, 0, 0);
+
+    // If time is in the past, schedule for tomorrow
+    if (scheduleDate < new Date()) {
+      scheduleDate.setDate(scheduleDate.getDate() + 1);
+    }
+
+    try {
+      await LocalNotifications.schedule({
+        notifications: [{
+          id: Math.floor(Math.random() * 10000) + 5000,
+          title: 'Task Reminder',
+          body: `Subject : ${subject}\nchapter : ${chapter}`,
+          schedule: { at: scheduleDate, allowWhileIdle: true },
+          sound: 'default',
+          extra: { type: 'alarm' }
+        }]
+      });
+      return true;
+    } catch (error) {
+      console.error('Error setting quick alarm:', error);
+      return false;
+    }
   }
 };

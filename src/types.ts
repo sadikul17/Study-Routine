@@ -86,6 +86,7 @@ export interface RoutineItem {
 export const storage = {
   getSessions: async (userId: string): Promise<StudySession[]> => {
     try {
+      // 1. Try to get from Supabase
       const { data, error } = await supabase
         .from('sessions')
         .select('*')
@@ -97,13 +98,14 @@ export const storage = {
       
       const sessions = data as StudySession[];
       
-      // Cache only last 7 days sessions locally for offline access
+      // 2. Cache only last 7 days sessions locally for offline access
       const prunedSessions = sessions.filter(s => isWithinLast7Days(s.date));
       localStorage.setItem(`cached_sessions_${userId}`, JSON.stringify(prunedSessions));
       
       return sessions;
     } catch (error) {
       console.warn('Offline mode or query error (Sessions):', error);
+      // 3. Fallback to local cache
       const cached = localStorage.getItem(`cached_sessions_${userId}`);
       return safeParse(cached, []);
     }
@@ -300,7 +302,7 @@ export const storage = {
       console.warn('Offline mode or query error (Trash):', error);
       const trashKey = `cached_trash_${userId}`;
       const cached = localStorage.getItem(trashKey);
-      return cached ? JSON.parse(cached) : [];
+      return safeParse(cached, []);
     }
   },
   restoreFromTrash: async (userId: string, id: string) => {
@@ -737,13 +739,13 @@ export const storage = {
       if (error) throw error;
       
       const routines = data as RoutineItem[];
-      // Cache all routines locally
+      // Cache routines locally
       localStorage.setItem(`cached_routines_${userId}`, JSON.stringify(routines));
       return routines;
     } catch (error) {
       console.warn('Offline mode or query error (Routines):', error);
       const cached = localStorage.getItem(`cached_routines_${userId}`);
-      return cached ? JSON.parse(cached) : [];
+      return safeParse(cached, []);
     }
   },
   saveRoutine: async (userId: string, routine: Partial<RoutineItem>) => {

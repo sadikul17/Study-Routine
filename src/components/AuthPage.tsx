@@ -144,14 +144,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       }
 
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error } = await supabase.auth.signInWithPassword({ 
+          email: email.trim().toLowerCase(), 
+          password 
+        });
         if (error) throw error;
       } else {
         // For Android/iOS apps, we need to ensure the redirect URL is correct
         // Capacitor apps on Android usually use http://localhost
         const redirectTo = Capacitor.isNativePlatform() ? 'http://localhost' : window.location.origin;
         const { error } = await supabase.auth.signUp({ 
-          email: email.trim(), 
+          email: email.trim().toLowerCase(), 
           password,
           options: {
             emailRedirectTo: redirectTo
@@ -165,6 +168,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       let message = err.message;
       if (message === 'Failed to fetch') {
         message = 'Network error. Please check your internet connection and ensure Supabase URL is reachable from your mobile device.';
+      } else if (message === 'Invalid login credentials') {
+        message = 'Invalid email or password. Please check your credentials or use the "Forgot?" link to reset your password.';
       }
       setError(message || 'An unexpected error occurred during authentication.');
     } finally {
