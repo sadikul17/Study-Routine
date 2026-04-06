@@ -3,7 +3,11 @@ import {
   Home as HomeIcon, 
   BarChart2, 
   Settings as SettingsIcon, 
+  ArrowUp,
+  ArrowDown,
   Plus, 
+  PlusCircle,
+  LogIn,
   X, 
   Book, 
   Music, 
@@ -30,6 +34,7 @@ import {
   Undo2,
   Check,
   LogOut,
+  User as UserIcon,
   Smartphone as Store,
   Printer,
   Settings2,
@@ -41,7 +46,12 @@ import {
   Archive,
   Bell,
   Clock,
-  AlarmClock
+  AlarmClock,
+  Sunrise,
+  Sunset,
+  CloudSun,
+  Stars,
+  Dumbbell
 } from 'lucide-react';
 import { 
   format, 
@@ -60,6 +70,7 @@ import {
   subDays,
   differenceInDays
 } from 'date-fns';
+import { bn } from 'date-fns/locale';
 import { 
   AreaChart,
   Area,
@@ -75,7 +86,7 @@ import {
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { storage, type StudySession, type AppSettings, type UserProfile, type TimerState, getWeekDays, type RoutineItem, safeParse } from './types';
+import { storage, type StudySession, type AppSettings, type UserProfile, type TimerState, getWeekDays, type RoutineItem, safeParse, type PrayerSettings, type PrayerTime, type ScheduleItem } from './types';
 import { supabase } from './lib/supabase';
 import { AuthPage } from './components/AuthPage';
 import { notificationService } from './lib/notifications';
@@ -86,6 +97,7 @@ import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { Network } from '@capacitor/network';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -105,6 +117,8 @@ const RoutineCard = ({
   onPermanentlyDeleteRoutine,
   onSaveRoutine
 }: any) => {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
   let statusText = '';
   let statusColor = '';
   
@@ -115,167 +129,437 @@ const RoutineCard = ({
     
     if (diff < 0) {
       statusText = 'End';
-      statusColor = 'bg-red-500/10 text-red-500';
+      statusColor = 'text-red-500';
     } else {
       statusText = diff.toString();
-      statusColor = 'bg-orange-500/10 text-orange-500';
+      statusColor = 'text-orange-500';
     }
   }
-  
+
   return (
     <div 
       key={`${routine.id}-${index}`}
       className={cn(
-        "p-5 rounded-[2rem] flex flex-col sm:flex-row justify-between items-start sm:items-center relative transition-all duration-300 border overflow-hidden",
+        "p-6 sm:p-8 rounded-[2.5rem] flex flex-col relative transition-all duration-500 border overflow-hidden group",
         darkMode 
-          ? "bg-slate-800/40 border-slate-700 hover:border-indigo-500/50 shadow-xl shadow-black/20" 
-          : "bg-white border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-md"
+          ? "bg-[#111827] border-white/5 hover:border-indigo-500/30 shadow-2xl shadow-black/40" 
+          : "bg-white border-slate-200 hover:border-indigo-500/30 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/5"
       )}
     >
-      <div className="space-y-4 flex-1 min-w-0 w-full">
-        <div className="flex items-center justify-between w-full gap-2">
+      <div className="space-y-8 flex-1 min-w-0 w-full">
+        <div className="flex flex-wrap items-center gap-3 w-full">
           <div className={cn(
-            "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shrink-0",
-            darkMode ? "bg-slate-700 text-slate-300" : "bg-slate-100 text-slate-600"
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.15em] shrink-0 transition-colors",
+            darkMode ? "bg-white/5 text-white/50" : "bg-slate-100 text-slate-500"
           )}>
             <Calendar size={12} className="text-indigo-500" />
             {format(new Date(routine.date), 'MMM d, yyyy')}
           </div>
 
           {statusText && (
-            <span className={cn("text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 whitespace-nowrap", statusColor)}>
-              <Clock size={12} />
+            <div className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-[0.15em] shrink-0",
+              darkMode ? "bg-white/5" : "bg-slate-100",
+              statusColor
+            )}>
+              <Clock size={10} />
               {statusText} {statusText === 'End' ? '' : 'Days Left'}
-            </span>
-          )}
-
-          {view !== 'deleted' && (
-            <button
-              onClick={() => onDeleteRoutine(routine.id)}
-              className={cn(
-                "p-2 rounded-xl transition-all opacity-30 hover:opacity-100 hover:bg-red-500/10 text-red-500 shrink-0",
-                darkMode ? "hover:bg-red-500/20" : "hover:bg-red-50"
-              )}
-              title="Delete"
-            >
-              <Trash2 size={18} />
-            </button>
+            </div>
           )}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-3">
           <h3 className={cn(
-            "font-black text-2xl leading-tight tracking-tight break-words",
-            darkMode ? "text-indigo-400" : "text-indigo-600"
+            "font-bold text-xl sm:text-2xl leading-tight tracking-tight break-words",
+            darkMode ? "text-white" : "text-slate-900"
           )}>
             {routine.subject}
           </h3>
+          
           <div className={cn(
-            "inline-flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-bold",
-            darkMode ? "bg-indigo-500/10 text-indigo-300" : "bg-indigo-50 text-indigo-700"
+            "flex items-center gap-2 text-sm sm:text-base font-bold",
+            darkMode ? "text-indigo-300" : "text-indigo-600"
           )}>
-            <Book size={14} />
-            {routine.chapter}
+            <Book size={16} className="shrink-0" />
+            <span className="truncate">{routine.chapter}</span>
           </div>
         </div>
 
         {routine.topics && (
           <div className={cn(
-            "p-4 rounded-2xl text-sm leading-relaxed border",
+            "p-6 sm:p-8 rounded-2xl text-sm leading-relaxed border transition-all",
             darkMode 
-              ? "bg-slate-900/50 border-slate-700/50 text-slate-300" 
-              : "bg-slate-50 border-slate-100 text-slate-600"
+              ? "bg-white/[0.02] border-white/5 text-white/80" 
+              : "bg-slate-50/50 border-slate-100 text-slate-600"
           )}>
-            <div className="flex items-center gap-2 mb-2 opacity-60">
-              <Target size={14} className="text-indigo-500" />
+            <div className="flex items-center gap-2 mb-4 opacity-60">
+              <Target size={14} className={cn("shrink-0", darkMode ? "text-indigo-400" : "text-indigo-600")} />
               <span className="text-[10px] font-black uppercase tracking-[0.2em]">Topics to Cover</span>
             </div>
-            <p className="whitespace-pre-line break-words font-medium">
+            <p className="whitespace-pre-line break-words font-semibold text-base sm:text-lg leading-relaxed">
               {routine.topics}
             </p>
           </div>
         )}
       </div>
 
-      <div className="flex flex-row sm:flex-col gap-3 items-center sm:items-end mt-4 sm:mt-0 sm:ml-6 w-full sm:w-auto justify-between sm:justify-center border-t sm:border-t-0 pt-4 sm:pt-0 border-slate-100 dark:border-slate-700">
-        {view === 'active' && (
-          <button
-            onClick={() => onAddTask(routine.subject, routine.chapter, routine.topics || '', routine.date, routine.end_date, routine.reminder_time)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all border active:scale-95",
-              darkMode 
-                ? "bg-transparent border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/10" 
-                : "bg-transparent border-indigo-500 text-indigo-600 hover:bg-indigo-50"
-            )}
-          >
-            <Plus size={16} />
-            ADD TASK
-          </button>
-        )}
-        <div className="flex items-center gap-2">
-          {view !== 'deleted' ? (
-            <>
+      <div className={cn(
+        "flex items-center justify-end gap-3 mt-10 pt-8 border-t w-full",
+        darkMode ? "border-white/5" : "border-slate-100"
+      )}>
+        {view !== 'deleted' ? (
+          <>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className={cn(
+                "p-3 rounded-2xl transition-all border active:scale-95 flex items-center justify-center",
+                darkMode 
+                  ? "text-red-400 border-white/5 hover:bg-red-500/10 hover:border-red-500/20" 
+                  : "text-red-600 border-slate-200 hover:bg-red-50 hover:border-red-200"
+              )}
+              title="Delete"
+            >
+              <Trash2 size={20} />
+            </button>
+            <button
+              onClick={() => {
+                if (view === 'ended') {
+                  onSaveRoutine({
+                    ...routine,
+                    end_date: ''
+                  });
+                } else {
+                  const today = new Date();
+                  onSaveRoutine({
+                    ...routine,
+                    end_date: format(subDays(today, 1), 'yyyy-MM-dd')
+                  });
+                }
+              }}
+              className={cn(
+                "p-3 rounded-2xl transition-all border active:scale-95 flex items-center justify-center",
+                view === 'ended' 
+                  ? "text-green-500 border-green-500/10 hover:bg-green-500/10" 
+                  : "text-orange-500 border-orange-500/10 hover:bg-orange-500/10",
+                darkMode ? "border-white/5" : "border-slate-200"
+              )}
+              title={view === 'ended' ? "Move to Active" : "Move to Ended"}
+            >
+              <History size={20} />
+            </button>
+            <button
+              onClick={() => handleEditRoutine(routine)}
+              className={cn(
+                "p-3 rounded-2xl transition-all border active:scale-95 flex items-center justify-center",
+                darkMode 
+                  ? "text-indigo-400 border-white/5 hover:bg-indigo-500/10 hover:border-indigo-500/20" 
+                  : "text-indigo-600 border-slate-200 hover:bg-indigo-50 hover:border-indigo-200"
+              )}
+              title="Edit"
+            >
+              <Edit size={20} />
+            </button>
+            {view === 'active' && (
               <button
-                onClick={() => handleEditRoutine(routine)}
+                onClick={() => onAddTask(routine.id, routine.subject, routine.chapter, routine.topics || '', routine.date, routine.end_date, routine.reminder_time)}
                 className={cn(
-                  "p-2.5 rounded-xl transition-all border",
+                  "p-3 rounded-2xl transition-all border active:scale-95 flex items-center justify-center",
                   darkMode 
-                    ? "text-indigo-400 border-slate-700 hover:bg-slate-700" 
-                    : "text-indigo-600 border-slate-200 hover:bg-slate-50"
+                    ? "text-indigo-400 border-white/5 hover:bg-indigo-500/10 hover:border-indigo-500/20" 
+                    : "text-indigo-600 border-slate-200 hover:bg-indigo-50 hover:border-indigo-200"
                 )}
-                title="Edit"
+                title="Add Task"
               >
-                <Edit size={20} />
+                <Plus size={20} strokeWidth={3} />
               </button>
-              <button
-                  onClick={() => {
-                    if (view === 'ended') {
-                      onSaveRoutine({
-                        ...routine,
-                        end_date: ''
-                      });
-                    } else {
-                      const today = new Date();
-                      onSaveRoutine({
-                        ...routine,
-                        end_date: format(subDays(today, 1), 'yyyy-MM-dd')
-                      });
-                    }
-                  }}
-                  className={cn(
-                    "p-2.5 rounded-xl transition-all border",
-                    view === 'ended' 
-                      ? "text-green-500 border-green-100 bg-green-50/50 hover:bg-green-50" 
-                      : "text-orange-500 border-orange-100 bg-orange-50/50 hover:bg-orange-50",
-                    darkMode && (view === 'ended' ? "border-green-900/30 bg-green-900/10 hover:bg-green-900/20" : "border-orange-900/30 bg-orange-900/10 hover:bg-orange-900/20")
-                  )}
-                  title={view === 'ended' ? "Move to Active" : "Move to Ended"}
-                >
-                  <History size={20} />
-                </button>
-            </>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onRestoreRoutine(routine.id)}
-                className="p-2.5 rounded-xl text-green-500 border border-green-100 bg-green-50/50 hover:bg-green-50 dark:border-green-900/30 dark:bg-green-900/10 transition-all"
-                title="Restore"
-              >
-                <RefreshCw size={20} />
-              </button>
-              <button
-                onClick={() => {
-                  onPermanentlyDeleteRoutine(routine.id);
-                }}
-                className="p-2.5 rounded-xl text-red-500 border border-red-100 bg-red-50/50 hover:bg-red-50 dark:border-red-900/30 dark:bg-red-900/10 transition-all"
-                title="Permanently Delete"
-              >
-                <Trash2 size={20} />
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onRestoreRoutine(routine.id)}
+              className="p-3 rounded-2xl text-green-500 border border-green-500/10 hover:bg-green-500/10 transition-all active:scale-90 flex items-center justify-center"
+              title="Restore"
+            >
+              <RefreshCw size={20} />
+            </button>
+            <button
+              onClick={() => {
+                onPermanentlyDeleteRoutine(routine.id);
+              }}
+              className="p-3 rounded-2xl text-red-500 border border-red-500/10 hover:bg-red-500/10 transition-all active:scale-90 flex items-center justify-center"
+              title="Permanently Delete"
+            >
+              <Trash2 size={20} />
+            </button>
+          </div>
+        )}
       </div>
+
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "w-full max-w-xs p-6 rounded-2xl border shadow-2xl space-y-6",
+                darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+              )}
+            >
+              <div className="text-center space-y-2">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto text-red-500">
+                  <Trash2 size={24} />
+                </div>
+                <h3 className={cn("text-lg font-black", darkMode ? "text-white" : "text-slate-900")}>Delete Routine?</h3>
+                <p className={cn("text-sm", darkMode ? "text-slate-400" : "text-slate-500")}>Are you sure you want to delete this routine?</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className={cn(
+                    "flex-1 py-3 rounded-xl text-sm font-black transition-all",
+                    darkMode ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={() => {
+                    onDeleteRoutine(routine.id);
+                    setShowDeleteConfirm(false);
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-red-500 text-white text-sm font-black hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                >
+                  DELETE
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+const PrayerModal = ({ isOpen, onClose, settings, onSave, darkMode }: any) => {
+  const [localSettings, setLocalSettings] = useState<PrayerSettings>(settings);
+  const [isFetching, setIsFetching] = useState(false);
+
+  useEffect(() => {
+    if (settings) {
+      setLocalSettings(settings);
+    }
+  }, [settings]);
+
+  const handleTimeChange = (name: string, time: string) => {
+    setLocalSettings(prev => ({
+      ...prev,
+      times: prev.times.map(t => t.name === name ? { ...t, time, isManual: true } : t)
+    }));
+  };
+
+  const handleToggle = (name: string) => {
+    setLocalSettings(prev => ({
+      ...prev,
+      times: prev.times.map(t => t.name === name ? { ...t, enabled: !t.enabled } : t)
+    }));
+  };
+
+  const fetchPrayerTimes = async () => {
+    setIsFetching(true);
+    try {
+      // Coordinates for Sherpur, Bogura (24.6775, 89.4169)
+      // Using Method 13 (Islamic Foundation, Bangladesh) for maximum accuracy
+      // This matches the official timings used in Bangladesh
+      const response = await fetch('https://api.aladhan.com/v1/timings?latitude=24.6775&longitude=89.4169&method=13');
+      const data = await response.json();
+      if (data.code === 200) {
+        const timings = data.data.timings;
+        const newTimes = localSettings.times.map(t => {
+          if (t.isManual) return t; // Don't update if user set it manually
+          let apiName = t.name;
+          if (t.name === 'Tahajjud') apiName = 'Midnight';
+          if (t.name === 'Gym') return t; // Don't update Gym time from API
+          
+          if (timings[apiName]) {
+             // Aladhan returns HH:mm, which is perfect for our input
+             return { ...t, time: timings[apiName], isManual: false };
+          }
+          return t;
+        });
+        setLocalSettings(prev => ({ ...prev, times: newTimes, last_updated: new Date().toISOString() }));
+      }
+    } catch (error) {
+      console.error('Error fetching prayer times:', error);
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const lastUpdate = localSettings.last_updated ? format(new Date(localSettings.last_updated), 'yyyy-MM-dd') : '';
+      
+      if (lastUpdate !== today) {
+        fetchPrayerTimes();
+      }
+    }
+  }, [isOpen]);
+
+  const clearTime = (name: string) => {
+    setLocalSettings(prev => ({
+      ...prev,
+      times: prev.times.map(t => t.name === name ? { ...t, time: '', isManual: false } : t)
+    }));
+  };
+
+  const formatTo12h = (time: string) => {
+    if (!time) return '';
+    const [hours, minutes] = time.split(':');
+    const h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${minutes} ${ampm}`;
+  };
+
+  const clearAllTimes = () => {
+    setLocalSettings(prev => ({
+      ...prev,
+      times: prev.times.map(t => ({ ...t, time: '' }))
+    }));
+  };
+
+  const getPrayerIcon = (name: string) => {
+    switch (name) {
+      case 'Fajr': return <Sunrise size={18} />;
+      case 'Dhuhr': return <Sun size={18} />;
+      case 'Asr': return <CloudSun size={18} />;
+      case 'Maghrib': return <Sunset size={18} />;
+      case 'Isha': return <Moon size={18} />;
+      case 'Tahajjud': return <Stars size={18} />;
+      case 'Gym': return <Dumbbell size={18} />;
+      default: return <Clock size={18} />;
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className={cn(
+          "w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl border",
+          darkMode ? "bg-[#111827] text-white border-white/5" : "bg-white text-slate-900 border-slate-200"
+        )}
+      >
+        <div className="p-5 sm:p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-500">
+                <Clock size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-black tracking-tight">PRAYER TIMES</h2>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50">Sherpur, Bogura</p>
+              </div>
+            </div>
+            <button onClick={onClose} className={cn(
+              "p-2 rounded-xl transition-colors",
+              darkMode ? "hover:bg-white/5" : "hover:bg-slate-100"
+            )}>
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
+            {localSettings.times.map((prayer) => (
+                <div 
+                  key={prayer.name}
+                  className={cn(
+                    "flex items-center justify-between p-3 sm:p-4 min-h-[100px] rounded-[2rem] border transition-all group",
+                    darkMode 
+                      ? "bg-white/5 border-white/5 hover:bg-white/[0.08]" 
+                      : "bg-slate-50 border-slate-100 hover:bg-slate-100"
+                  )}
+                >
+                  <div className="flex items-center gap-2 sm:gap-4">
+                    <div className={cn(
+                      "w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center transition-all shadow-sm shrink-0",
+                      darkMode ? "bg-white/5 text-indigo-400" : "bg-white text-indigo-500 border border-slate-100"
+                    )}>
+                      {getPrayerIcon(prayer.name)}
+                    </div>
+                    <span className="font-black text-[11px] sm:text-[13px] uppercase tracking-[0.1em] sm:tracking-[0.15em] opacity-80 leading-tight">{prayer.name}</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "flex items-center px-2 sm:px-4 py-3 sm:py-5 rounded-2xl border transition-all relative group/time",
+                      darkMode ? "bg-black/20 border-white/5" : "bg-white border-slate-200 shadow-sm"
+                    )}>
+                      <div className="flex flex-col items-center">
+                        <input 
+                          type="time" 
+                          value={prayer.time}
+                          onChange={(e) => handleTimeChange(prayer.name, e.target.value)}
+                          className={cn(
+                            "bg-transparent font-black text-sm sm:text-base outline-none focus:text-indigo-500 transition-colors w-20 sm:w-24 text-center",
+                            darkMode ? "text-white" : "text-slate-900"
+                          )}
+                        />
+                        {prayer.time && (
+                          <span className={cn(
+                            "text-[8px] sm:text-[9px] font-black tracking-tighter opacity-40",
+                            darkMode ? "text-white" : "text-slate-900"
+                          )}>
+                            {formatTo12h(prayer.time)}
+                          </span>
+                        )}
+                      </div>
+                      {prayer.isManual && prayer.time && (
+                        <button 
+                          onClick={() => clearTime(prayer.name)}
+                          className={cn(
+                            "absolute right-1 bottom-1 w-5 h-5 rounded-full flex items-center justify-center transition-all shadow-md z-10",
+                            darkMode ? "bg-red-500/40 text-white hover:bg-red-500/60" : "bg-red-500 text-white hover:bg-red-600"
+                          )}
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-3 pt-4">
+            <button 
+              onClick={fetchPrayerTimes}
+              disabled={isFetching}
+              className={cn(
+                "w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center justify-center gap-2 transition-all",
+                darkMode ? "bg-white/5 hover:bg-white/10 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+              )}
+            >
+              <RefreshCw size={14} className={cn(isFetching && "animate-spin")} />
+              {isFetching ? 'FETCHING...' : 'UPDATE'}
+            </button>
+            
+            <button 
+              onClick={() => onSave(localSettings)}
+              className="w-full py-4 rounded-2xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-xl shadow-indigo-500/20 transition-all"
+            >
+              SAVE SETTINGS
+            </button>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 };
@@ -287,6 +571,10 @@ const RoutinePage = ({
   onRestoreRoutine,
   onPermanentlyDeleteRoutine,
   onAddTask,
+  onSync,
+  onOpenPrayerTimes,
+  isSyncing,
+  isRestored,
   user, 
   darkMode 
 }: { 
@@ -295,7 +583,11 @@ const RoutinePage = ({
   onDeleteRoutine: (id: string) => Promise<void>,
   onRestoreRoutine: (id: string) => Promise<void>,
   onPermanentlyDeleteRoutine: (id: string) => Promise<void>,
-  onAddTask: (subject: string, chapter: string, topics: string, date: string, end_date?: string, reminder_time?: string) => Promise<void>,
+  onAddTask: (routineId: string, subject: string, chapter: string, topics: string, date: string, end_date?: string, reminder_time?: string) => Promise<void>,
+  onSync: () => Promise<void>,
+  onOpenPrayerTimes: () => void,
+  isSyncing: boolean,
+  isRestored: boolean,
   user: any,
   darkMode: boolean
 }) => {
@@ -314,7 +606,32 @@ const RoutinePage = ({
   const [printStartDate, setPrintStartDate] = useState('');
   const [printEndDate, setPrintEndDate] = useState('');
   const [view, setView] = useState<'active' | 'ended' | 'deleted'>('active');
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
   const printRef = useRef<HTMLDivElement>(null);
+
+  const calendarDays = useMemo(() => {
+    const start = startOfWeek(startOfMonth(calendarMonth), { weekStartsOn: 1 });
+    const days = [];
+    let current = start;
+    for (let i = 0; i < 42; i++) {
+      days.push(current);
+      current = addDays(current, 1);
+    }
+    return days;
+  }, [calendarMonth]);
+
+  useEffect(() => {
+    if (selectedDate) {
+      try {
+        const date = new Date(selectedDate);
+        if (!isNaN(date.getTime())) {
+          setCalendarMonth(date);
+        }
+      } catch (e) {}
+    }
+  }, [selectedDate]);
+
+  const allRoutines = useMemo(() => routines.filter(r => !r.deleted_at), [routines]);
 
   const activeRoutines = useMemo(() => routines.filter(r => {
     if (r.deleted_at) return false;
@@ -384,15 +701,46 @@ const RoutinePage = ({
       // Determine which dates to print (unique dates in the range that have routines)
       const allDatesToPrint = Object.keys(groupedRoutines).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
-      // Chunk dates into pages (7 days per page)
-      const daysPerPage = 7;
-      const dateChunks = [];
-      for (let i = 0; i < allDatesToPrint.length; i += daysPerPage) {
-        dateChunks.push(allDatesToPrint.slice(i, i + daysPerPage));
-      }
+      // Dynamic chunking to prevent page breaks cutting through rows
+      const dateChunks: string[][] = [];
+      let currentChunk: string[] = [];
+      let estimatedHeight = 0;
+      // A4 is 210x297mm. At 800px width, height is ~1131px.
+      // We use a safe limit of 980px to account for margins and header/footer and prevent cutting.
+      const maxHeight = 980; 
+
+      allDatesToPrint.forEach(dateStr => {
+        const dayRoutines = groupedRoutines[dateStr] || [];
+        // Estimate height for this date block
+        let dayHeight = 0;
+        if (dayRoutines.length === 0) {
+          dayHeight = 100;
+        } else {
+          let routinesHeight = 0;
+          dayRoutines.forEach(r => {
+            const topicsLineCount = r.topics ? r.topics.split('\n').length : 1;
+            // Each topic line is roughly 22px, plus base row height
+            routinesHeight += 60 + (topicsLineCount * 22);
+          });
+          // Date cell content (Date + Day + Start/End) needs at least ~140px
+          dayHeight = Math.max(routinesHeight, 140);
+        }
+        
+        if (estimatedHeight + dayHeight > maxHeight && currentChunk.length > 0) {
+          dateChunks.push(currentChunk);
+          currentChunk = [dateStr];
+          estimatedHeight = 260 + dayHeight; // Base header/footer/padding height (~260px)
+        } else {
+          if (currentChunk.length === 0) estimatedHeight = 260; 
+          currentChunk.push(dateStr);
+          estimatedHeight += dayHeight;
+        }
+      });
+      if (currentChunk.length > 0) dateChunks.push(currentChunk);
 
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfPageHeight = pdf.internal.pageSize.getHeight();
       
       for (let i = 0; i < dateChunks.length; i++) {
         if (i > 0) pdf.addPage();
@@ -403,47 +751,55 @@ const RoutinePage = ({
         tempContainer.style.left = '-9999px';
         tempContainer.style.top = '0';
         tempContainer.style.width = '800px';
-        tempContainer.style.padding = '40px';
+        tempContainer.style.padding = '0';
         tempContainer.style.backgroundColor = '#ffffff';
         tempContainer.style.color = '#000000';
         tempContainer.style.fontFamily = '"Hind Siliguri", "Inter", sans-serif';
         
         let htmlContent = `
-          <div style="font-family: 'Hind Siliguri', sans-serif; color: #1e293b; background-color: #ffffff; padding: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #4338CA; padding-bottom: 20px; margin-bottom: 30px;">
+          <div style="font-family: 'Hind Siliguri', 'Inter', sans-serif; color: #1e293b; background-color: #ffffff; padding: 40px; width: 800px; min-height: 1100px; display: flex; flex-direction: column; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #4f46e5; padding-bottom: 20px; margin-bottom: 20px;">
               <div>
-                <h1 style="font-size: 32px; color: #4338CA; margin: 0; font-weight: 900; letter-spacing: -0.02em;">STUDY ROUTINE SCHEDULE</h1>
-                <p style="font-size: 14px; color: #64748b; margin: 8px 0 0 0; font-weight: 500;">
-                  Page ${i + 1} of ${dateChunks.length} | 
-                  <span style="color: #4338CA; font-weight: 700;">${view === 'deleted' ? 'Deleted Records' : 'Active & Ended Routines'}</span>
-                </p>
+                <h1 style="font-size: 34px; color: #4f46e5; margin: 0; font-weight: 900; letter-spacing: -0.04em; text-transform: uppercase;">Study Routine</h1>
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+                  <span style="font-size: 13px; color: #64748b; font-weight: 700; background: #f1f5f9; padding: 3px 10px; border-radius: 20px;">Page ${i + 1} of ${dateChunks.length}</span>
+                  <span style="font-size: 13px; color: #4f46e5; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">${view === 'deleted' ? 'Archive' : 'Active Schedule'}</span>
+                </div>
+              </div>
+              <div style="text-align: right; background: #f8fafc; padding: 12px 20px; border-radius: 20px; border: 1.5px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                <p style="font-size: 9px; color: #94a3b8; margin: 0; text-transform: uppercase; letter-spacing: 0.2em; font-weight: 800;">Exported Date</p>
+                <p style="font-size: 16px; color: #1e293b; font-weight: 900; margin: 2px 0 0 0;">${format(new Date(), 'MMM d, yyyy')}</p>
+              </div>
+            </div>
+            
+            <div style="margin-bottom: 20px; background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 15px 25px; border-radius: 20px; display: flex; align-items: center; justify-content: space-between; color: white; box-shadow: 0 8px 15px -5px rgba(79, 70, 229, 0.3);">
+              <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="background: rgba(255,255,255,0.15); padding: 8px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2);">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </div>
+                <div>
+                  <p style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; opacity: 0.9; margin: 0;">Schedule Duration</p>
+                  <p style="font-size: 18px; font-weight: 900; margin: 0;">${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d, yyyy')}</p>
+                </div>
               </div>
               <div style="text-align: right;">
-                <p style="font-size: 10px; color: #94a3b8; margin: 0; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700;">Exported On</p>
-                <p style="font-size: 15px; color: #1e293b; font-weight: 800; margin: 2px 0 0 0;">${format(new Date(), 'MMM d, yyyy')}</p>
-                <p style="font-size: 12px; color: #64748b; margin: 0;">${format(new Date(), 'HH:mm')}</p>
+                <p style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; opacity: 0.9; margin: 0;">Total Coverage</p>
+                <p style="font-size: 18px; font-weight: 900; margin: 0;">${differenceInDays(endDate, startDate) + 1} Days</p>
               </div>
             </div>
             
-            <div style="margin-bottom: 30px; background: linear-gradient(to right, #f8fafc, #f1f5f9); padding: 16px 24px; border-radius: 16px; border: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-              <div style="width: 8px; height: 8px; background-color: #4338CA; border-radius: 50%;"></div>
-              <span style="color: #4338CA; font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;">Report Period:</span>
-              <span style="font-weight: 700; color: #1e293b; font-size: 15px;">${format(startDate, 'MMM d, yyyy')}</span>
-              <span style="color: #cbd5e1; font-weight: 300; font-size: 20px;">&mdash;</span>
-              <span style="font-weight: 700; color: #1e293b; font-size: 15px;">${format(endDate, 'MMM d, yyyy')}</span>
-            </div>
-            
-            <table style="width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-              <thead>
-                <tr style="background-color: #4338CA; color: #ffffff;">
-                  <th style="padding: 18px 16px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; border-right: 1px solid rgba(255,255,255,0.1);">DATE</th>
-                  <th style="padding: 18px 16px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; border-right: 1px solid rgba(255,255,255,0.1);">Subject</th>
-                  <th style="padding: 18px 16px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; border-right: 1px solid rgba(255,255,255,0.1);">Chapter</th>
-                  <th style="padding: 18px 16px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800;">Topics & Details</th>
-                </tr>
-              </thead>
-              <tbody>
-            `;
+            <div style="flex-grow: 1;">
+              <table style="width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 24px; overflow: hidden; border: 1.5px solid #e2e8f0; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);">
+                <thead>
+                  <tr style="background-color: #4f46e5; color: #ffffff;">
+                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">DATE</th>
+                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Subject</th>
+                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Chapter</th>
+                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900;">Topics & Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+        `;
         
         chunk.forEach((dateStr, idx) => {
           const dayRoutines = groupedRoutines[dateStr] || [];
@@ -453,36 +809,44 @@ const RoutinePage = ({
           if (dayRoutines.length === 0) {
             htmlContent += `
               <tr style="background-color: ${rowBg};">
-                <td style="padding: 20px 16px; border-bottom: ${isLastDate ? 'none' : '1px solid #e2e8f0'}; border-right: 1px solid #e2e8f0; vertical-align: top; width: 160px;">
-                  <div style="font-weight: 900; color: #1e293b; font-size: 16px;">${format(new Date(dateStr), 'MMM d')}</div>
-                  <div style="font-size: 12px; color: #64748b; margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">${format(new Date(dateStr), 'EEEE')}</div>
+                <td style="padding: 25px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; border-right: 1.5px solid #f1f5f9; vertical-align: top; width: 160px;">
+                  <div style="font-weight: 900; color: #1e293b; font-size: 18px;">${format(new Date(dateStr), 'MMM d')}</div>
+                  <div style="font-size: 12px; color: #64748b; margin-top: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">${format(new Date(dateStr), 'EEEE')}</div>
                 </td>
-                <td colspan="3" style="padding: 20px 16px; border-bottom: ${isLastDate ? 'none' : '1px solid #e2e8f0'}; color: #94a3b8; font-style: italic; font-size: 14px; text-align: center; letter-spacing: 0.02em;">No routine scheduled for this date</td>
+                <td colspan="3" style="padding: 25px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; color: #94a3b8; font-style: italic; font-size: 15px; text-align: center; letter-spacing: 0.03em; font-weight: 500;">No routine scheduled for this date</td>
               </tr>
             `;
           } else {
             dayRoutines.forEach((r, rIdx) => {
               const isLastRoutine = rIdx === dayRoutines.length - 1;
-              const borderBottom = (isLastDate && isLastRoutine) ? 'none' : '1px solid #e2e8f0';
+              const borderBottom = (isLastDate && isLastRoutine) ? 'none' : '1.5px solid #f1f5f9';
 
               htmlContent += `
                 <tr style="background-color: ${rowBg};">
                   ${rIdx === 0 ? `
-                    <td style="padding: 20px 16px; border-bottom: ${isLastDate ? 'none' : '1px solid #e2e8f0'}; border-right: 1px solid #e2e8f0; vertical-align: top; width: 160px;" rowspan="${dayRoutines.length}">
-                      <div style="font-weight: 900; color: #1e293b; font-size: 16px;">${format(new Date(dateStr), 'MMM d')}</div>
-                      <div style="font-size: 12px; color: #64748b; margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">${format(new Date(dateStr), 'EEEE')}</div>
-                      <div style="margin-top: 12px; font-size: 10px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; border-top: 1px solid #e2e8f0; padding-top: 8px;">
-                        Start: ${format(new Date(r.date), 'MMM d')}
-                        ${r.end_date ? `<br/>End: ${format(new Date(r.end_date), 'MMM d')}` : ''}
+                    <td style="padding: 30px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; border-right: 1.5px solid #f1f5f9; vertical-align: top; width: 150px; min-width: 150px;" rowspan="${dayRoutines.length}">
+                      <div style="font-weight: 900; color: #1e293b; font-size: 20px; line-height: 1;">${format(new Date(dateStr), 'MMM d')}</div>
+                      <div style="font-size: 12px; color: #64748b; margin-top: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2;">${format(new Date(dateStr), 'EEEE')}</div>
+                      <div style="margin-top: 20px; font-size: 11px; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; border-top: 2px solid #f1f5f9; padding-top: 12px; line-height: 1.5;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                          <span style="color: #94a3b8; font-weight: 700;">START</span>
+                          <span>${format(new Date(r.date), 'MMM d')}</span>
+                        </div>
+                        ${r.end_date ? `
+                        <div style="display: flex; justify-content: space-between;">
+                          <span style="color: #94a3b8; font-weight: 700;">END</span>
+                          <span>${format(new Date(r.end_date), 'MMM d')}</span>
+                        </div>
+                        ` : ''}
                       </div>
                     </td>
                   ` : ''}
-                  <td style="padding: 20px 16px; border-bottom: ${borderBottom}; border-right: 1px solid #e2e8f0; vertical-align: top;">
-                    <div style="color: #4338CA; font-weight: 800; font-size: 15px; line-height: 1.2;">${r.subject}</div>
+                  <td style="padding: 25px 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; vertical-align: top;">
+                    <div style="color: #4f46e5; font-weight: 900; font-size: 16px; line-height: 1.2;">${r.subject}</div>
                   </td>
-                  <td style="padding: 20px 16px; border-bottom: ${borderBottom}; border-right: 1px solid #e2e8f0; color: #334155; font-size: 14px; font-weight: 600; vertical-align: top; line-height: 1.4;">${r.chapter}</td>
-                  <td style="padding: 20px 16px; border-bottom: ${borderBottom}; color: #475569; font-size: 13px; vertical-align: top; line-height: 1.6; font-weight: 500;">
-                    ${r.topics ? r.topics.split('\n').map(t => `<div style="margin-bottom: 4px; display: flex; gap: 6px;"><span style="color: #4338CA;">&bull;</span><span>${t}</span></div>`).join('') : '<span style="color: #cbd5e1; font-style: italic;">No topics specified</span>'}
+                  <td style="padding: 25px 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; color: #334155; font-size: 15px; font-weight: 700; vertical-align: top; line-height: 1.4;">${r.chapter}</td>
+                  <td style="padding: 25px 20px; border-bottom: ${borderBottom}; color: #475569; font-size: 14px; vertical-align: top; line-height: 1.6; font-weight: 600;">
+                    ${r.topics ? r.topics.split('\n').map(t => `<div style="margin-bottom: 6px; display: flex; gap: 8px;"><span style="color: #4f46e5; font-weight: 900;">&bull;</span><span>${t}</span></div>`).join('') : '<span style="color: #cbd5e1; font-style: italic;">No topics specified</span>'}
                   </td>
                 </tr>
               `;
@@ -493,12 +857,16 @@ const RoutinePage = ({
         htmlContent += `
               </tbody>
             </table>
-            <div style="margin-top: 40px; border-top: 2px solid #f1f5f9; padding-top: 20px; display: flex; justify-content: space-between; align-items: center;">
-              <p style="font-size: 11px; color: #94a3b8; margin: 0; font-weight: 600;">&copy; ${new Date().getFullYear()} Study Planner Pro &bull; Excellence through consistency</p>
-              <div style="display: flex; gap: 15px;">
-                <div style="width: 12px; height: 12px; background-color: #4338CA; border-radius: 3px;"></div>
-                <div style="width: 12px; height: 12px; background-color: #818cf8; border-radius: 3px;"></div>
-                <div style="width: 12px; height: 12px; background-color: #c7d2fe; border-radius: 3px;"></div>
+            </div>
+            <div style="margin-top: auto; padding-top: 30px; border-top: 2px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <p style="font-size: 12px; color: #1e293b; margin: 0; font-weight: 800; letter-spacing: 0.02em;">STUDY PLANNER PRO</p>
+                <p style="font-size: 10px; color: #94a3b8; margin: 2px 0 0 0; font-weight: 600;">Excellence through consistency &bull; &copy; ${new Date().getFullYear()}</p>
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <div style="width: 30px; height: 6px; background-color: #4f46e5; border-radius: 10px;"></div>
+                <div style="width: 20px; height: 6px; background-color: #818cf8; border-radius: 10px;"></div>
+                <div style="width: 10px; height: 6px; background-color: #c7d2fe; border-radius: 10px;"></div>
               </div>
             </div>
           </div>
@@ -519,25 +887,15 @@ const RoutinePage = ({
         
         document.body.removeChild(tempContainer);
         
-        const imgData = canvas.toDataURL('image/jpeg', 1.0);
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const imgProps = pdf.getImageProperties(imgData);
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-        const pdfPageHeight = pdf.internal.pageSize.getHeight();
         
-        let heightLeft = pdfHeight;
-        let position = 0;
-
-        // Add the first page for this chunk
-        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
-        heightLeft -= pdfPageHeight;
-
-        // If the chunk overflows the page, add more pages
-        while (heightLeft > 0) {
-          position = heightLeft - pdfHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
-          heightLeft -= pdfPageHeight;
-        }
+        // Calculate dimensions to fit A4 width
+        const displayWidth = pdfWidth;
+        const displayHeight = (imgProps.height * displayWidth) / imgProps.width;
+        
+        // We trust the chunking logic to keep it within page height
+        pdf.addImage(imgData, 'JPEG', 0, 0, displayWidth, displayHeight);
       }
 
       if (Capacitor.isNativePlatform()) {
@@ -573,8 +931,8 @@ const RoutinePage = ({
         chapter,
         topics,
         date: selectedDate,
-        end_date: selectedEndDate || undefined,
-        reminder_time: reminderTime || undefined,
+        end_date: selectedEndDate || null,
+        reminder_time: reminderTime || null,
         countdown: 0
       });
       resetForm();
@@ -605,26 +963,84 @@ const RoutinePage = ({
   };
 
   return (
-    <div ref={printRef} className="space-y-8">
-      {/* Routine List Container */}
-      <div className={cn(
-        "rounded-[2.5rem] border p-8 min-h-[500px] relative overflow-hidden",
-        darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200 shadow-2xl shadow-slate-200/50"
-      )}>
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-10">
-          <div className="flex items-center gap-4">
-            <h2 className={cn("text-3xl font-black tracking-tight", darkMode ? "text-white" : "text-slate-900")}>
-              {view === 'active' ? 'Routine' : view === 'ended' ? 'Ended History' : 'Deleted Archive'}
-            </h2>
+    <div ref={printRef} className="space-y-4 pb-20">
+      <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-2xl py-4 flex flex-col gap-4 transition-all border-b border-transparent">
+        <div className="space-y-2">
+          <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
+            {view === 'active' ? 'Routine' : view === 'ended' ? 'Ended History' : 'Deleted Archive'}
+          </h1>
+          <p className={cn(
+            "text-xs sm:text-sm font-bold uppercase tracking-[0.3em] opacity-40",
+            darkMode ? "text-white" : "text-slate-900"
+          )}>
+            {view === 'active' ? '' : ''}
+          </p>
+        </div>
+        
+        <div className="flex items-center w-full">
+        <div className={cn(
+          "flex items-center gap-1 p-1.5 rounded-[2rem] shadow-2xl w-full border",
+          darkMode ? "bg-[#111827]/80 border-white/5 shadow-black/40" : "bg-white/80 border-slate-200 shadow-slate-200/50"
+        )}>
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1">
+            <button
+              onClick={() => setView('active')}
+              className={cn(
+                "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0",
+                view === 'active' 
+                  ? "bg-transparent text-indigo-500 scale-105" 
+                  : "text-slate-500 hover:text-indigo-500"
+              )}
+            >
+              ACTIVE
+            </button>
+            <button
+              onClick={() => setView('ended')}
+              className={cn(
+                "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0",
+                view === 'ended' 
+                  ? "bg-transparent text-indigo-500 scale-105" 
+                  : "text-slate-500 hover:text-indigo-500"
+              )}
+            >
+              ENDED
+            </button>
+
+            <button
+              onClick={() => setView('deleted')}
+              className={cn(
+                "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0 flex items-center justify-center",
+                view === 'deleted' 
+                  ? "bg-transparent text-indigo-500 scale-105" 
+                  : "text-slate-500 hover:text-indigo-500"
+              )}
+              title="Trash"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={onOpenPrayerTimes}
+              className={cn(
+                "px-3 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all flex items-center justify-center",
+                darkMode ? "text-slate-400 hover:text-indigo-400" : "text-slate-500 hover:text-indigo-500"
+              )}
+              title="Prayer Times"
+            >
+              <Clock size={18} />
+            </button>
             <div className="relative">
               <button
                 onClick={() => setShowPrintOptions(!showPrintOptions)}
                 className={cn(
-                  "p-2 rounded-xl transition-all border",
-                  darkMode ? "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                  "px-3 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all flex items-center justify-center",
+                  darkMode ? "text-slate-400 hover:text-indigo-400" : "text-slate-500 hover:text-indigo-500"
                 )}
+                title="Download Routine"
               >
-                <Download size={20} />
+                <Download size={18} />
               </button>
               
               <AnimatePresence>
@@ -634,24 +1050,24 @@ const RoutinePage = ({
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95, y: 10 }}
                     className={cn(
-                      "absolute left-1/2 -translate-x-1/2 top-12 z-50 w-56 p-5 rounded-[2rem] border shadow-2xl",
-                      darkMode ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
+                      "absolute right-0 top-full mt-4 z-50 w-56 p-5 rounded-[2rem] border shadow-2xl backdrop-blur-2xl",
+                      darkMode ? "bg-[#111827]/95 border-white/10" : "bg-white/95 border-slate-200"
                     )}
                   >
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                       <div className="flex items-center gap-2 text-indigo-500">
-                        <Printer size={18} />
-                        <span className="font-black text-sm uppercase tracking-wider">Export PDF</span>
+                        <Printer size={16} />
+                        <span className="font-black text-[10px] uppercase tracking-[0.15em]">Export PDF</span>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50">Days to Include</label>
+                        <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">Days</label>
                         <input 
                           type="number"
                           value={printDays}
                           onChange={(e) => setPrintDays(e.target.value)}
                           className={cn(
-                            "w-full px-4 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-bold",
-                            darkMode ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                            "w-full px-3 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-xs font-black",
+                            darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                           )}
                           min="1"
                         />
@@ -659,26 +1075,26 @@ const RoutinePage = ({
                       
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50">Start Date</label>
+                          <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">Start</label>
                           <input 
                             type="date"
                             value={printStartDate}
                             onChange={(e) => setPrintStartDate(e.target.value)}
                             className={cn(
-                              "w-full px-3 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs font-bold",
-                              darkMode ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                              "w-full px-2 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-[10px] font-black",
+                              darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                             )}
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50">End Date</label>
+                          <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">End</label>
                           <input 
                             type="date"
                             value={printEndDate}
                             onChange={(e) => setPrintEndDate(e.target.value)}
                             className={cn(
-                              "w-full px-3 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs font-bold",
-                              darkMode ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                              "w-full px-2 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-[10px] font-black",
+                              darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                             )}
                           />
                         </div>
@@ -686,7 +1102,7 @@ const RoutinePage = ({
                       <button
                         onClick={generatePDF}
                         disabled={isGeneratingPDF}
-                        className="w-full py-3 rounded-xl bg-indigo-500 text-white text-sm font-black hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-500/30 disabled:opacity-50 active:scale-95"
+                        className="w-full py-3 rounded-xl bg-indigo-500 text-white text-[10px] font-black hover:bg-indigo-600 transition-all shadow-xl shadow-indigo-500/30 disabled:opacity-50 active:scale-95"
                       >
                         {isGeneratingPDF ? "GENERATING..." : "DOWNLOAD PDF"}
                       </button>
@@ -695,66 +1111,26 @@ const RoutinePage = ({
                 )}
               </AnimatePresence>
             </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <div className={cn(
-              "flex items-center p-1 rounded-2xl",
-              darkMode ? "bg-slate-800" : "bg-slate-100"
-            )}>
-              <button
-                onClick={() => setView('active')}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-black transition-all",
-                  view === 'active' 
-                    ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" 
-                    : "text-slate-500 hover:text-indigo-500"
-                )}
-              >
-                ACTIVE
-              </button>
-              <button
-                onClick={() => setView('ended')}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-black transition-all",
-                  view === 'ended' 
-                    ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" 
-                    : "text-slate-500 hover:text-indigo-500"
-                )}
-              >
-                ENDED
-              </button>
-              <button
-                onClick={() => setView('deleted')}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-black transition-all",
-                  view === 'deleted' 
-                    ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" 
-                    : "text-slate-500 hover:text-indigo-500"
-                )}
-              >
-                TRASH
-              </button>
-            </div>
 
-            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden sm:block" />
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setView('active');
-                  setIsAdding(!isAdding);
-                }}
-                className="p-3 rounded-2xl bg-indigo-500 text-white hover:bg-indigo-600 transition-all shadow-xl shadow-indigo-500/30 active:scale-95"
-              >
-                {isAdding ? <X size={20} /> : <Plus size={20} />}
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setView('active');
+                setIsAdding(!isAdding);
+              }}
+              className={cn(
+                "px-3 py-2.5 rounded-2xl transition-all active:scale-95 flex items-center justify-center shrink-0",
+                darkMode ? "text-indigo-400 hover:bg-indigo-500/10" : "text-indigo-600 hover:bg-indigo-50"
+              )}
+              title="Add New Routine"
+            >
+              {isAdding ? <X size={20} strokeWidth={3} /> : <Plus size={20} strokeWidth={3} />}
+            </button>
           </div>
         </div>
+        </div>
+      </header>
 
-        {/* Back button removed per request */}
-
+      <div className="relative">
         <AnimatePresence>
           {isAdding && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -848,27 +1224,110 @@ const RoutinePage = ({
                     </div>
                   </div>
 
-                  <div className="flex gap-3 items-center pt-2">
-                    <div className="relative flex-shrink-0 w-28">
-                      <input 
-                        type="time"
-                        value={reminderTime}
-                        onChange={(e) => setReminderTime(e.target.value)}
-                        placeholder="set a time"
-                        className={cn(
-                          "w-full px-3 py-2.5 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-center",
-                          darkMode ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                        )}
-                      />
-                    </div>
-
+                  <div className="pt-2">
                     <button
                       onClick={handleAddNow}
                       disabled={isSaving || !subject || !chapter}
-                      className="flex-1 py-2.5 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
+                      className="w-full py-3 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
                     >
                       {isSaving ? (editingRoutineId ? "Updating..." : "Adding...") : (editingRoutineId ? "Update Routine" : "Add Routine")}
                     </button>
+                  </div>
+
+                  {/* Inline Calendar for Date Selection Preview */}
+                  <div className={cn(
+                    "p-4 rounded-2xl border space-y-3",
+                    darkMode ? "bg-slate-800/50 border-slate-700" : "bg-slate-50 border-slate-200"
+                  )}>
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest opacity-60">
+                        {format(calendarMonth, 'MMMM yyyy')}
+                      </span>
+                      <div className="flex gap-1">
+                        <button 
+                          onClick={() => setCalendarMonth(prev => subMonths(prev, 1))}
+                          className="p-1 hover:bg-indigo-500/10 rounded-lg transition-colors text-indigo-500"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <button 
+                          onClick={() => setCalendarMonth(prev => addMonths(prev, 1))}
+                          className="p-1 hover:bg-indigo-500/10 rounded-lg transition-colors text-indigo-500"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1">
+                      {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
+                        <div key={`header-${i}`} className="text-center text-[8px] font-black text-slate-400 py-1">
+                          {day}
+                        </div>
+                      ))}
+                      {calendarDays.map((day, i) => {
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const isStart = selectedDate === dateStr;
+                        const isEnd = selectedEndDate === dateStr;
+                        const isCurrentMonth = isSameMonth(day, calendarMonth);
+                        
+                        let isInRange = false;
+                        if (selectedDate && selectedEndDate) {
+                          try {
+                            const start = startOfDay(new Date(selectedDate));
+                            const end = startOfDay(new Date(selectedEndDate));
+                            if (isBefore(start, end) || isSameDay(start, end)) {
+                              isInRange = isWithinInterval(startOfDay(day), { start, end });
+                            }
+                          } catch (e) {}
+                        }
+
+                        // Count how many other routines cover this day
+                        const overlappingRoutines = allRoutines.filter(r => {
+                          if (r.id === editingRoutineId) return false;
+                          try {
+                            const start = startOfDay(new Date(r.date));
+                            const end = r.end_date ? startOfDay(new Date(r.end_date)) : start;
+                            return isWithinInterval(startOfDay(day), { start, end });
+                          } catch (e) { return false; }
+                        });
+
+                        return (
+                          <div
+                            key={`inline-cal-${i}`}
+                            className={cn(
+                              "aspect-square flex items-center justify-center text-[10px] font-bold rounded-lg transition-all relative",
+                              !isCurrentMonth && "opacity-20",
+                              isStart || isEnd 
+                                ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 z-10" 
+                                : isInRange 
+                                  ? "bg-indigo-500/20 text-indigo-500" 
+                                  : overlappingRoutines.length > 0
+                                    ? darkMode ? "bg-white/10 text-indigo-300" : "bg-indigo-50 text-indigo-400"
+                                    : darkMode ? "text-slate-400 hover:bg-white/5" : "text-slate-600 hover:bg-slate-200"
+                            )}
+                          >
+                            {format(day, 'd')}
+                            {overlappingRoutines.length > 0 && (
+                              <div className="absolute bottom-1 flex gap-0.5 justify-center w-full px-0.5">
+                                {overlappingRoutines.slice(0, 3).map((_, idx) => (
+                                  <div 
+                                    key={idx} 
+                                    className={cn(
+                                      "w-1 h-1 rounded-full",
+                                      isStart || isEnd ? "bg-white/60" : "bg-indigo-400/60"
+                                    )} 
+                                  />
+                                ))}
+                                {overlappingRoutines.length > 3 && (
+                                  <div className={cn("w-0.5 h-0.5 rounded-full", isStart || isEnd ? "bg-white/30" : "bg-indigo-400/30")} />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -1199,15 +1658,15 @@ const Timer = ({
 
 const Card = ({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) => (
   <motion.div 
-    whileHover={onClick ? { scale: 1.005 } : {}}
+    whileHover={onClick ? { scale: 1.01, y: -2 } : {}}
     whileTap={onClick ? { scale: 0.98 } : {}}
     onClick={onClick}
     className={cn(
-      "rounded-card p-6 border md:shadow-xl overflow-hidden transition-all duration-200 ease-out will-change-transform",
-      "bg-card border-white/5", // Default dark mode
-      "light:bg-white light:border-gray-200 light:shadow-sm", // Light mode
+      "rounded-[2rem] p-6 md:p-8 border overflow-hidden transition-all duration-300 ease-out will-change-transform",
+      "bg-card border-white/5 shadow-2xl shadow-black/20", // Default dark mode
+      "light:bg-white light:border-gray-100 light:shadow-xl light:shadow-slate-200/50", // Light mode
       className, 
-      onClick && "cursor-pointer active:opacity-80 touch-manipulation"
+      onClick && "cursor-pointer active:opacity-90 touch-manipulation hover:border-primary/30"
     )}
     style={{ transform: 'translateZ(0)' }}
   >
@@ -1225,7 +1684,6 @@ const Badge = ({ count, color }: { count: number; color: string }) => (
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'overview' | 'settings' | 'routine'>('home');
-  const [activeSettingsSection, setActiveSettingsSection] = useState<'preferences'>('preferences');
   
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [routines, setRoutines] = useState<RoutineItem[]>([]);
@@ -1277,6 +1735,23 @@ export default function App() {
   const [isFullCalendarOpen, setIsFullCalendarOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRestored, setIsRestored] = useState(false);
+  const [isPrayerModalOpen, setIsPrayerModalOpen] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const lastNotifiedMinute = useRef<string>('');
+  const [prayerSettings, setPrayerSettings] = useState<PrayerSettings>({
+    times: [
+      { name: 'Fajr', time: '04:30', enabled: true },
+      { name: 'Dhuhr', time: '12:15', enabled: true },
+      { name: 'Asr', time: '16:30', enabled: true },
+      { name: 'Maghrib', time: '18:15', enabled: true },
+      { name: 'Isha', time: '19:45', enabled: true },
+      { name: 'Tahajjud', time: '03:00', enabled: true },
+      { name: 'Gym', time: '07:00', enabled: true },
+    ],
+    location: 'Sherpur, Bogura'
+  });
   const [user, setUser] = useState<any>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
@@ -1293,6 +1768,23 @@ export default function App() {
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(25 * 60);
 
   const [profile, setProfile] = useState<UserProfile>({ name: 'Student', grade: 'Grade 10', school: 'Your School', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' });
+  
+  const [profileForm, setProfileForm] = useState<UserProfile>(profile);
+
+  useEffect(() => {
+    setProfileForm(profile);
+  }, [profile]);
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user && !isGuestMode) return;
+    
+    const userId = user?.id || 'guest_user';
+    console.log('[App] Saving profile for user ID:', userId);
+    setProfile(profileForm);
+    await storage.saveProfile(userId, profileForm);
+  };
+
   const [isGeneratingHomePDF, setIsGeneratingHomePDF] = useState(false);
   const [showHomePrintOptions, setShowHomePrintOptions] = useState(false);
   const [homePrintDays, setHomePrintDays] = useState('7');
@@ -1354,6 +1846,40 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isTimerActive, timerTimeLeft]);
 
+  // Prayer Notifications
+  useEffect(() => {
+    if (!settings.notifications) return;
+
+    const checkPrayerTimes = () => {
+      const now = new Date();
+      const currentTime = format(now, 'HH:mm');
+      
+      // Prevent duplicate notifications in the same minute
+      if (lastNotifiedMinute.current === currentTime) return;
+
+      let notifiedInThisMinute = false;
+      prayerSettings.times.forEach(prayer => {
+        if (prayer.enabled && prayer.time === currentTime) {
+          notificationService.notify(
+            `Time for ${prayer.name}`,
+            `It's ${currentTime}. Time for your scheduled ${prayer.name}.`,
+            notificationService.hashCode(`prayer_${prayer.name}_${currentTime}`)
+          );
+          notifiedInThisMinute = true;
+        }
+      });
+
+      if (notifiedInThisMinute) {
+        lastNotifiedMinute.current = currentTime;
+      }
+    };
+
+    const interval = setInterval(checkPrayerTimes, 10000); // Check every 10 seconds for better accuracy
+    checkPrayerTimes(); // Initial check
+
+    return () => clearInterval(interval);
+  }, [prayerSettings, settings.notifications]);
+
   useEffect(() => {
     const isAnyModalOpen = isFullCalendarOpen || isModalOpen || isTrashOpen || !!detailModalData;
     const mainElement = document.querySelector('main');
@@ -1367,34 +1893,55 @@ export default function App() {
 
   // Optimized refreshData for instant startup
   const refreshData = useCallback(async (userId: string) => {
+    console.log('[App] Refreshing data for user:', userId);
     // 1. First, try to load from local cache immediately
     const cacheKey = `cached_sessions_${userId}`;
     const trashKey = `cached_trash_${userId}`;
     const routinesKey = `cached_routines_${userId}`;
+    const prayerKey = `cached_prayer_settings_${userId}`;
     
     const cachedSessions = localStorage.getItem(cacheKey);
     const cachedTrash = localStorage.getItem(trashKey);
     const cachedRoutines = localStorage.getItem(routinesKey);
+    const cachedSettings = localStorage.getItem(`cached_settings_${userId}`);
+    const cachedProfile = localStorage.getItem(`cached_profile_${userId}`);
+    const cachedPrayer = localStorage.getItem(prayerKey);
     
     try {
       if (cachedSessions) setSessions(JSON.parse(cachedSessions));
       if (cachedTrash) setTrash(JSON.parse(cachedTrash));
       if (cachedRoutines) setRoutines(JSON.parse(cachedRoutines));
+      if (cachedSettings) setSettings(JSON.parse(cachedSettings));
+      if (cachedProfile) setProfile(JSON.parse(cachedProfile));
+      if (cachedPrayer) setPrayerSettings(JSON.parse(cachedPrayer));
     } catch (e) {
       console.warn('Error parsing cached data:', e);
     }
 
     // 2. Then, fetch from Supabase in the background
     try {
-      const [sessionsData, trashData, routinesData] = await Promise.all([
+      const status = await Network.getStatus();
+      if (!status.connected) {
+        console.log('[App] Offline: Skipping background fetch');
+        return;
+      }
+
+      const [sessionsData, trashData, routinesData, settingsData, profileData, prayerData] = await Promise.all([
         storage.getSessions(userId),
         storage.getTrash(userId),
-        storage.getRoutines(userId)
+        storage.getRoutines(userId),
+        storage.getSettings(userId),
+        storage.getProfile(userId),
+        storage.getPrayerSettings(userId)
       ]);
       
       setSessions(sessionsData);
       setTrash(trashData);
       setRoutines(routinesData);
+      setSettings(settingsData);
+      setProfile(profileData);
+      setPrayerSettings(prayerData);
+      console.log('[App] Background fetch complete');
     } catch (error) {
       console.warn('Background sync failed:', error);
     }
@@ -1403,8 +1950,27 @@ export default function App() {
   useEffect(() => {
     // Check session validity on mount to handle "Invalid Refresh Token" errors
     const checkSession = async () => {
+      const timeout = setTimeout(() => {
+        if (isAuthLoading) {
+          console.warn('[App] Auth check timed out, proceeding with local state');
+          setIsAuthLoading(false);
+        }
+      }, 5000); // 5 second timeout
+
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
+        clearTimeout(timeout);
+
+        if (session?.user) {
+          console.log('[App] Initial session found:', session.user.id);
+          setUser(session.user);
+          setIsAuthLoading(false);
+          refreshData(session.user.id);
+        } else {
+          console.log('[App] No initial session found');
+          setIsAuthLoading(false);
+        }
+        
         if (error) {
           if (error.message.includes('Refresh Token Not Found') || error.message.includes('Invalid Refresh Token')) {
             console.warn('Invalid session detected, signing out to clear state');
@@ -1413,10 +1979,28 @@ export default function App() {
         }
       } catch (e) {
         console.error('Error checking session:', e);
+        setIsAuthLoading(false);
       }
     };
     checkSession();
-  }, []);
+  }, [refreshData]);
+
+  useEffect(() => {
+    // Listen for network changes
+    const handleNetworkChange = async (status: any) => {
+      console.log('[App] Network status changed:', status.connected ? 'Online' : 'Offline');
+      if (status.connected && user) {
+        // Automatically sync when back online
+        storage.syncOfflineData(user.id);
+      }
+    };
+
+    const listener = Network.addListener('networkStatusChange', handleNetworkChange);
+    
+    return () => {
+      listener.then(l => l.remove());
+    };
+  }, [user]);
 
   useEffect(() => {
     // Timeout for auth loading to prevent hanging
@@ -1425,12 +2009,14 @@ export default function App() {
         console.warn('Auth loading timed out, proceeding as guest');
         setIsAuthLoading(false);
       }
-    }, 30000); // Increased to 30s for mobile apps
+    }, 5000); // Reduced timeout to 5s for better UX when offline
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       clearTimeout(authTimeout);
       const currentUser = session?.user || null;
       
+      console.log(`[App] Auth Event: ${event}`, currentUser?.id);
+
       if (event === 'PASSWORD_RECOVERY' || window.location.hash.includes('type=recovery')) {
         setIsRecovering(true);
       }
@@ -1445,29 +2031,24 @@ export default function App() {
         storage.getProfile(currentUser.id).then(p => {
           setProfile(p);
         }).catch(err => console.warn('Failed to load profile:', err));
-      } else {
-        // Only clear user if we're not in guest mode
-        setUser(prev => {
-          if (prev?.id === 'guest_user') return prev;
-          return null;
-        });
+      } else if (event === 'SIGNED_OUT') {
+        // Only clear user if explicitly signed out
+        setUser(null);
+        setIsGuestMode(false);
+        // Clear local cache on logout to be safe
+        localStorage.clear();
+      } else if (event === 'INITIAL_SESSION' && !currentUser) {
+        // If initial session is null and we're not in guest mode, 
+        // we might want to wait for the timeout or proceed as guest
+        // but we don't necessarily want to clear the user if checkSession found one
       }
+      
       setIsAuthLoading(false);
     });
-
-    // Add online listener to sync data when connection is restored
-    const handleOnline = () => {
-      if (user?.id && user.id !== 'guest_user') {
-        console.log('App is online, triggering sync...');
-        storage.syncOfflineData(user.id);
-      }
-    };
-    window.addEventListener('online', handleOnline);
 
     return () => {
       subscription.unsubscribe();
       clearTimeout(authTimeout);
-      window.removeEventListener('online', handleOnline);
     };
   }, [refreshData]);
 
@@ -1540,10 +2121,8 @@ export default function App() {
     
     if (success) {
       // Refresh data after sync
-      storage.getSessions(user.id).then(setSessions).catch(err => console.warn('Refresh sessions failed:', err));
-      storage.getTrash(user.id).then(setTrash).catch(err => console.warn('Refresh trash failed:', err));
-      storage.getSettings(user.id).then(setSettings).catch(err => console.warn('Refresh settings failed:', err));
-      storage.getProfile(user.id).then(setProfile).catch(err => console.warn('Refresh profile failed:', err));
+      await refreshData(user.id);
+      setIsRestored(true);
     }
   };
 
@@ -1553,9 +2132,9 @@ export default function App() {
         setIsLoading(false);
         return;
       }
-      setIsLoading(true);
       
       // 1. Load from local cache immediately for fast UI
+      let hasAnyCache = false;
       try {
         const cachedSessions = localStorage.getItem(`cached_sessions_${user.id}`);
         const cachedTrash = localStorage.getItem(`cached_trash_${user.id}`);
@@ -1563,12 +2142,16 @@ export default function App() {
         const cachedProfile = localStorage.getItem(`cached_profile_${user.id}`);
         const cachedTimer = localStorage.getItem(`cached_timer_${user.id}`);
         const cachedRoutines = localStorage.getItem(`cached_routines_${user.id}`);
+        const cachedPrayerSettings = localStorage.getItem(`cached_prayer_settings_${user.id}`);
+        const cachedSchedules = localStorage.getItem(`cached_schedules_${user.id}`);
 
-        if (cachedSessions) setSessions(JSON.parse(cachedSessions));
+        if (cachedSessions) { setSessions(JSON.parse(cachedSessions)); hasAnyCache = true; }
         if (cachedTrash) setTrash(JSON.parse(cachedTrash));
         if (cachedSettings) setSettings(JSON.parse(cachedSettings));
         if (cachedProfile) setProfile(JSON.parse(cachedProfile));
         if (cachedRoutines) setRoutines(JSON.parse(cachedRoutines));
+        if (cachedPrayerSettings) setPrayerSettings(JSON.parse(cachedPrayerSettings));
+        if (cachedSchedules) setSchedules(JSON.parse(cachedSchedules));
         
         if (cachedTimer) {
           const timerData = JSON.parse(cachedTimer);
@@ -1579,6 +2162,13 @@ export default function App() {
         }
       } catch (e) {
         console.warn('Error loading initial cached data:', e);
+      }
+
+      // If we have cache, show UI immediately. Otherwise show loading screen.
+      if (hasAnyCache) {
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
       }
 
       // 2. Then, fetch from Supabase in the background
@@ -1594,7 +2184,7 @@ export default function App() {
         }
 
         const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('Timeout loading data')), 30000);
+          timeoutId = setTimeout(() => reject(new Error('Timeout loading data')), 15000); // Reduced timeout to 15s
         });
 
         const dataPromise = Promise.all([
@@ -1603,7 +2193,9 @@ export default function App() {
           storage.getSettings(user.id),
           storage.getProfile(user.id),
           storage.getTimer(user.id),
-          storage.getRoutines(user.id)
+          storage.getRoutines(user.id),
+          storage.getPrayerSettings(user.id),
+          storage.getSchedules(user.id)
         ]);
 
         // Race the data fetch against the timeout
@@ -1615,19 +2207,20 @@ export default function App() {
         // Clear the timeout if dataPromise wins
         if (timeoutId) clearTimeout(timeoutId);
 
-        const [sessionsData, trashData, settingsData, profileData, timerData, routinesData] = result as [StudySession[], StudySession[], AppSettings, UserProfile, TimerState | null, RoutineItem[]];
+        const [sessionsData, trashData, settingsData, profileData, timerData, routinesData, prayerData, schedulesData] = result as [StudySession[], StudySession[], AppSettings, UserProfile, TimerState | null, RoutineItem[], PrayerSettings, ScheduleItem[]];
 
         setSessions(sessionsData);
         setTrash(trashData);
         setSettings(settingsData);
         setProfile(profileData);
         setRoutines(routinesData);
+        setPrayerSettings(prayerData);
+        setSchedules(schedulesData);
 
         if (timerData) {
           setTimerTotalSeconds(timerData.total_seconds);
           setTimerInitialMinutes(Math.floor(timerData.total_seconds / 60));
           
-          // If timer was active, calculate elapsed time
           if (timerData.is_active) {
             const elapsed = Math.floor((Date.now() - timerData.last_saved_at) / 1000);
             const newTimeLeft = Math.max(0, timerData.time_left - elapsed);
@@ -1643,6 +2236,7 @@ export default function App() {
         if (timeoutId) clearTimeout(timeoutId);
       } finally {
         setIsLoading(false);
+        setIsSyncing(false);
       }
     };
 
@@ -1671,15 +2265,23 @@ export default function App() {
     if (user) refreshData(user.id);
     
     // Listen for online status to sync data
-    const handleOnline = () => {
-      if (user) storage.syncOfflineData(user.id).then(() => refreshData(user.id)).catch(err => console.warn('Sync offline data failed:', err));
+    const handleOnline = async () => {
+      if (user && user.id !== 'guest_user') {
+        console.log('Connection restored. Syncing pending data...');
+        try {
+          await storage.syncOfflineData(user.id);
+          await refreshData(user.id);
+        } catch (err) {
+          console.warn('Sync on reconnect failed:', err);
+        }
+      }
     };
 
     window.addEventListener('online', handleOnline);
     
-    // Initial sync check
-    if (navigator.onLine && user) {
-      storage.syncOfflineData(user.id).then(() => refreshData(user.id)).catch(err => console.warn('Initial sync failed:', err));
+    // Initial sync check if online
+    if (navigator.onLine && user && user.id !== 'guest_user') {
+      storage.syncOfflineData(user.id).catch(err => console.warn('Initial sync check failed:', err));
     }
 
     return () => window.removeEventListener('online', handleOnline);
@@ -1700,20 +2302,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user && user.id !== 'guest_user') {
-      notificationService.scheduleReminders(sessions, routines, settings);
+    if (user) {
+      notificationService.scheduleReminders(sessions, routines, settings, prayerSettings, schedules);
     }
 
     // Reschedule when app comes back to foreground to ensure accuracy
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user && user.id !== 'guest_user') {
-        notificationService.scheduleReminders(sessions, routines, settings);
+      if (document.visibilityState === 'visible' && user) {
+        notificationService.scheduleReminders(sessions, routines, settings, prayerSettings, schedules);
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [sessions, routines, settings, user]);
+  }, [sessions, routines, settings, user, prayerSettings, schedules]);
 
   const handleReorder = async (newOrder: StudySession[], isCompleted: boolean) => {
     if (!user) return;
@@ -2036,12 +2638,32 @@ export default function App() {
 
   const daysWithSessions = useMemo(() => {
     const set = new Set<string>();
+    
+    // Add dates from sessions
     sessions.forEach(s => {
       const dateStr = s.date.includes('T') ? format(new Date(s.date), 'yyyy-MM-dd') : s.date;
       set.add(dateStr);
     });
+
+    // Add dates from routines (start_date to end_date range)
+    routines.forEach(r => {
+      if (r.deleted_at) return;
+      
+      const start = new Date(r.date.includes('T') ? r.date : r.date + 'T00:00:00');
+      const end = r.end_date 
+        ? new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T00:00:00')
+        : start;
+
+      // Iterate through all days in range
+      let current = new Date(start);
+      while (current <= end) {
+        set.add(format(current, 'yyyy-MM-dd'));
+        current = addDays(current, 1);
+      }
+    });
+
     return set;
-  }, [sessions]);
+  }, [sessions, routines]);
 
   if (isAuthLoading) {
     return (
@@ -2095,28 +2717,28 @@ export default function App() {
   return (
     <div className="h-full h-[100dvh] bg-background flex flex-col md:flex-row w-full max-w-full overflow-hidden border-none">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-64 flex-col bg-card border-none md:border-r border-white/5 light:border-gray-200 p-6 fixed h-full z-50 transition-colors">
+      <aside className="hidden md:flex w-64 flex-col bg-card border-none md:border-r border-white/5 light:border-gray-200 p-6 fixed h-full z-50 transition-colors shadow-2xl shadow-black/20">
         <div className="mb-12 px-2">
-          <h1 className="text-2xl font-bold tracking-tight text-primary">Study Routine</h1>
-          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Minimalist Planner</p>
+          <h1 className="text-3xl font-black tracking-tighter text-primary">STUDY<br/>ROUTINE</h1>
+          <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mt-2 opacity-60">Minimalist Planner</p>
         </div>
         
-        <nav className="flex-1 space-y-2">
+        <nav className="flex-1 space-y-3">
           <SidebarLink active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon={<HomeIcon />} label="Diary" />
           <SidebarLink active={activeTab === 'routine'} onClick={() => setActiveTab('routine')} icon={<Calendar />} label="Routine" />
           <SidebarLink active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart2 />} label="Overview" />
           <SidebarLink active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<SettingsIcon />} label="Settings" />
         </nav>
 
-        <div className="mt-auto">
+        <div className="mt-auto pt-6 border-t border-white/5">
           <motion.button 
-            whileHover={{ scale: 1.02 }}
+            whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setIsModalOpen(true)}
-            className="w-full flex items-center justify-center gap-2 bg-primary text-white py-4 rounded-2xl font-bold text-sm hover:opacity-90 transition-all md:shadow-lg md:shadow-primary/20"
+            className="w-full flex items-center justify-center gap-3 bg-primary text-white py-5 rounded-[1.5rem] font-black text-sm hover:opacity-90 transition-all shadow-xl shadow-primary/20 active:scale-95"
           >
-            <Plus size={18} />
-            Add Task
+            <Plus size={20} strokeWidth={3} />
+            ADD TASK
           </motion.button>
         </div>
       </aside>
@@ -2135,16 +2757,26 @@ export default function App() {
                 transition={{ duration: 0.2, ease: "easeOut" }}
                 className="px-5 py-6 md:p-10 space-y-8 overflow-x-hidden border-none"
               >
-                  <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl py-4 flex justify-between items-center transition-colors">
-                    <div>
-                      <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-foreground">Diary</h1>
-                      <p className="text-gray-400 mt-1 text-base md:text-lg">{format(selectedDate, 'MMMM d, yyyy')}</p>
+                  <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl py-6 flex justify-between items-center transition-all">
+                    <div className="space-y-1">
+                      <h1 className="text-4xl md:text-6xl font-black tracking-tight text-foreground">Diary</h1>
+                      <div className="flex items-center gap-2 text-gray-400 font-bold text-sm md:text-lg">
+                        <Calendar size={18} className="text-primary" />
+                        {format(selectedDate, 'MMMM d, yyyy')}
+                      </div>
                     </div>
                     <div className="flex gap-3">
+                      <button 
+                        onClick={() => setIsScheduleModalOpen(true)}
+                        className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
+                        title="Daily Schedule"
+                      >
+                        <Clock size={24} />
+                      </button>
                       <div className="relative">
                         <button 
                           onClick={() => setShowHomePrintOptions(!showHomePrintOptions)}
-                          className="w-14 h-14 flex items-center justify-center bg-card rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all"
+                          className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
                         >
                           <Download size={24} />
                         </button>
@@ -2199,7 +2831,7 @@ export default function App() {
                       </div>
                       <button 
                         onClick={() => setIsFullCalendarOpen(true)}
-                        className="w-14 h-14 flex items-center justify-center bg-card rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all"
+                        className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
                       >
                         <Calendar size={24} />
                       </button>
@@ -2449,7 +3081,7 @@ export default function App() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 10 }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
-                className="px-5 py-6 md:p-10 space-y-8 overflow-x-hidden border-none"
+                className="px-5 py-6 md:p-10 space-y-8 overflow-x-hidden border-none min-h-full"
               >
                 <RoutinePage 
                   routines={routines}
@@ -2477,43 +3109,52 @@ export default function App() {
                       await refreshData(user.id);
                     }
                   }}
-                  onAddTask={async (subject, chapter, topics, date, end_date, reminder_time) => {
+                  onAddTask={async (routineId, subject, chapter, topics, date, end_date, reminder_time) => {
                     if (user) {
-                      const start = startOfDay(new Date(date));
-                      const end = end_date ? startOfDay(new Date(end_date)) : start;
-                      const diff = differenceInDays(end, start);
-                      const daysCount = diff >= 0 ? diff + 1 : 1;
-                      
-                      const sessionsToSave: StudySession[] = [];
-                      
-                      for (let i = 0; i < daysCount; i++) {
-                        const currentDate = addDays(start, i);
-                        const dateStr = format(currentDate, 'yyyy-MM-dd');
+                      try {
+                        const start = startOfDay(new Date(date));
+                        const end = end_date ? startOfDay(new Date(end_date)) : start;
+                        const diff = differenceInDays(end, start);
+                        const daysCount = diff >= 0 ? diff + 1 : 1;
                         
-                        const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
-                          ? crypto.randomUUID() 
-                          : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                        const sessionsToSave: StudySession[] = [];
+                        
+                        for (let i = 0; i < daysCount; i++) {
+                          const currentDate = addDays(start, i);
+                          const dateStr = format(currentDate, 'yyyy-MM-dd');
+                          
+                          const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
+                            ? crypto.randomUUID() 
+                            : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
-                        const session: StudySession = {
-                          id: sessionId,
-                          user_id: user.id,
-                          subject,
-                          chapter,
-                          topics,
-                          color: '#5856D6',
-                          icon: 'Book',
-                          date: dateStr,
-                          completed: false,
-                          reminder_time
-                        };
-                        sessionsToSave.push(session);
+                          const session: StudySession = {
+                            id: sessionId,
+                            user_id: user.id,
+                            subject,
+                            chapter,
+                            topics,
+                            color: '#5856D6',
+                            icon: 'Book',
+                            date: dateStr,
+                            completed: false,
+                            reminder_time,
+                            routine_id: routineId
+                          };
+                          sessionsToSave.push(session);
+                        }
+                        
+                        await storage.saveSessions(user.id, sessionsToSave);
+                        await refreshData(user.id);
+                        setActiveTab('home');
+                      } catch (error) {
+                        console.error('Error adding tasks from routine:', error);
                       }
-                      
-                      await Promise.all(sessionsToSave.map(s => storage.saveSession(user.id, s)));
-                      await refreshData(user.id);
-                      setActiveTab('home');
                     }
                   }}
+                  onSync={handleManualSync}
+                  onOpenPrayerTimes={() => setIsPrayerModalOpen(true)}
+                  isSyncing={isSyncing}
+                  isRestored={isRestored}
                   user={user}
                   darkMode={settings.dark_mode}
                 />
@@ -2530,86 +3171,95 @@ export default function App() {
                 transition={{ duration: 0.2, ease: "easeOut" }}
                 className="p-6 md:p-10 space-y-8 overflow-x-hidden"
               >
-                <header>
-                  <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-foreground">Overview</h1>
-                  <p className="text-gray-400 mt-1 text-lg">Visualize your learning progress</p>
+                <header className="flex flex-col gap-6">
+                  <div>
+                    <h1 className="text-2xl font-medium tracking-tight text-foreground">Overview</h1>
+                  </div>
                 </header>
 
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatCard 
-                    icon={<Zap size={20} />} 
-                    label="TOTAL SESSIONS" 
-                    value={sessions.length.toString()} 
-                    color="text-indigo-400" 
-                    onClick={() => setDetailModalData({ 
-                      type: 'stat', 
-                      data: { 
-                        title: 'Total Sessions', 
-                        value: sessions.length.toString(),
-                        description: 'Total number of study sessions you have planned and executed since you started using Routine.'
-                      } 
-                    })}
-                  />
-                  <StatCard 
-                    icon={<Book size={20} />} 
-                    label="ACTIVE SUBJECTS" 
-                    value={new Set(sessions.map(s => s.subject)).size.toString()} 
-                    color="text-pink-400" 
-                    onClick={() => setDetailModalData({ 
-                      type: 'stat', 
-                      data: { 
-                        title: 'Active Subjects', 
-                        value: new Set(sessions.map(s => s.subject)).size.toString(),
-                        description: 'The number of unique subjects you are currently focusing on. Diversity in subjects helps keep your mind fresh!'
-                      } 
-                    })}
-                  />
-                  <StatCard 
-                    icon={<Target size={20} />} 
-                    label="EFFICIENCY" 
-                    value={`${efficiencyRate}%`} 
-                    color="text-emerald-400" 
-                    onClick={() => setDetailModalData({ 
-                      type: 'stat', 
-                      data: { 
-                        title: 'Efficiency Rate', 
-                        value: `${efficiencyRate}%`,
-                        description: 'Percentage of planned sessions that you have successfully completed. Aim for 80% or higher for optimal results.'
-                      } 
-                    })}
-                  />
-                  <StatCard 
-                    icon={<Flame size={20} />} 
-                    label="STREAK" 
-                    value={`${calculateStreak(sessions)} days`} 
-                    color="text-orange-400" 
-                    onClick={() => setDetailModalData({ 
-                      type: 'stat', 
-                      data: { 
-                        title: 'Study Streak', 
-                        value: `${calculateStreak(sessions)} days`,
-                        description: 'Consecutive days with at least one completed study session. Keep the flame alive!'
-                      } 
-                    })}
-                  />
-                </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <Card className="hover:bg-white/[0.02] light:hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setDetailModalData({ type: 'trend', data: { title: 'Activity Trends' } })}>
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <Activity size={18} className="text-primary" />
-                        </div>
-                        <h3 className="font-bold text-foreground">Activity Trends</h3>
+                <Card className="p-6">
+                  <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                        <Calendar size={20} className="text-indigo-500" />
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Weekly Total</p>
-                        <p className="text-xl font-black text-foreground">{last7DaysSessions.length}</p>
+                      <div>
+                        <h3 className="font-black text-foreground uppercase tracking-wider text-sm">3-Day Schedule</h3>
+                        <p className="text-xs text-gray-500 font-bold">Upcoming routines</p>
                       </div>
                     </div>
-                    <div className="h-64 w-full relative">
-                      <ResponsiveContainer width="100%" height="100%">
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {[0, 1, 2].map((offset) => {
+                      const day = addDays(startOfDay(new Date()), offset);
+                      const dateStr = format(day, 'yyyy-MM-dd');
+                      const dayRoutines = routines.filter(r => {
+                        if (r.deleted_at) return false;
+                        const rStart = r.date.includes('T') ? format(new Date(r.date), 'yyyy-MM-dd') : r.date;
+                        if (!r.end_date) return rStart === dateStr;
+                        const rEnd = r.end_date.includes('T') ? format(new Date(r.end_date), 'yyyy-MM-dd') : r.end_date;
+                        return dateStr >= rStart && dateStr <= rEnd;
+                      });
+
+                      return (
+                        <div key={offset} className={cn(
+                          "flex flex-col gap-3 p-4 rounded-2xl border transition-all",
+                          settings.dark_mode 
+                            ? (offset === 0 ? "bg-indigo-500/5 border-indigo-500/20" : "bg-white/[0.02] border-white/5") 
+                            : (offset === 0 ? "bg-indigo-50 border-indigo-200" : "bg-gray-50 border-gray-100")
+                        )}>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className={cn(
+                              "text-[10px] font-black uppercase tracking-[0.2em]",
+                              offset === 0 ? "text-indigo-500" : "text-gray-500"
+                            )}>
+                              {offset === 0 ? 'Today' : format(day, 'EEEE')}
+                            </p>
+                            <p className="text-[10px] font-bold text-gray-400">{format(day, 'MMM d')}</p>
+                          </div>
+
+                          <div className="space-y-3">
+                            {dayRoutines.length > 0 ? dayRoutines.map((r, rIdx) => (
+                              <div key={r.id + rIdx} className="group">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <div className="w-1 h-1 rounded-full bg-indigo-500" />
+                                  <p className="text-xs font-black text-foreground line-clamp-1 tracking-tight">{r.subject}</p>
+                                </div>
+                                <p className="text-[10px] text-gray-500 font-bold ml-3 line-clamp-1 opacity-70">{r.chapter}</p>
+                              </div>
+                            )) : (
+                              <div className="py-2">
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest opacity-40">No routine</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <Card className="lg:col-span-2 p-6 hover:bg-white/[0.02] light:hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setDetailModalData({ type: 'trend', data: { title: 'Activity Trends' } })}>
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                          <Activity size={20} className="text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-black text-foreground uppercase tracking-wider text-sm">Activity Trends</h3>
+                          <p className="text-xs text-gray-500 font-bold">Daily session distribution</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Weekly Total</p>
+                        <p className="text-2xl font-black text-foreground">{last7DaysSessions.length}</p>
+                      </div>
+                    </div>
+                    <div className="h-72 w-full relative">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <AreaChart data={generateChartData(sessions)}>
                           <defs>
                             <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
@@ -2622,7 +3272,7 @@ export default function App() {
                             dataKey="name" 
                             axisLine={false}
                             tickLine={false}
-                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 10, fontWeight: 600 }}
+                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 10, fontWeight: 800 }}
                             dy={10}
                           />
                           <YAxis hide />
@@ -2631,14 +3281,17 @@ export default function App() {
                               if (active && payload && payload.length) {
                                 return (
                                   <div className={cn(
-                                    "border p-3 rounded-xl shadow-2xl backdrop-blur-xl",
-                                    settings.dark_mode ? "bg-[#161B22] border-white/10" : "bg-white border-gray-200"
+                                    "border p-4 rounded-2xl shadow-2xl backdrop-blur-xl",
+                                    settings.dark_mode ? "bg-[#161B22]/90 border-white/10" : "bg-white/90 border-gray-200"
                                   )}>
-                                    <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">{payload[0].payload.name}</p>
-                                    <p className={cn(
-                                      "text-lg font-black",
-                                      settings.dark_mode ? "text-white" : "text-gray-900"
-                                    )}>{payload[0].value} <span className="text-xs font-normal text-gray-400">Sessions</span></p>
+                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">{payload[0].payload.name}</p>
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full bg-primary" />
+                                      <p className={cn(
+                                        "text-xl font-black",
+                                        settings.dark_mode ? "text-white" : "text-gray-900"
+                                      )}>{payload[0].value} <span className="text-xs font-medium text-gray-400">Sessions</span></p>
+                                    </div>
                                   </div>
                                 );
                               }
@@ -2659,79 +3312,75 @@ export default function App() {
                     </div>
                   </Card>
 
-                  <Card className="hover:bg-white/[0.02] light:hover:bg-gray-50 transition-colors relative overflow-hidden">
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-pink-400/10 flex items-center justify-center">
-                          <PieChartIcon size={18} className="text-pink-400" />
+                  <Card className="p-6 hover:bg-white/[0.02] light:hover:bg-gray-50 transition-colors relative overflow-hidden flex flex-col">
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-pink-400/10 flex items-center justify-center">
+                          <PieChartIcon size={20} className="text-pink-400" />
                         </div>
-                        <h3 className="font-bold text-foreground">Subject Focus</h3>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Most Focused</p>
-                        <p className="text-sm font-bold text-foreground truncate max-w-[100px]">
-                          {generatePieData(sessions).sort((a, b) => b.value - a.value)[0]?.name || 'None'}
-                        </p>
+                        <div>
+                          <h3 className="font-black text-foreground uppercase tracking-wider text-sm">Subject Focus</h3>
+                          <p className="text-xs text-gray-500 font-bold">Distribution by subject</p>
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                    
+                    <div className="flex-1 flex flex-col justify-center gap-8">
                       <div className="h-48 relative">
                         {sessions.length > 0 ? (
-                          <>
-                            <ResponsiveContainer width="100%" height="100%">
-                              <PieChart>
-                                <Pie
-                                  data={generatePieData(sessions)}
-                                  innerRadius={60}
-                                  outerRadius={80}
-                                  paddingAngle={8}
-                                  dataKey="value"
-                                  stroke="none"
-                                  onClick={(data: any) => setDetailModalData({ 
-                                    type: 'subject', 
-                                    data: { 
-                                      title: data.name, 
-                                      count: data.value,
-                                      completedCount: data.completedCount
-                                    } 
-                                  })}
-                                  className="cursor-pointer"
-                                >
-                                  {generatePieData(sessions).map((entry, index) => (
-                                    <Cell key={`cell-${index}-${entry.name}`} fill={entry.color} />
-                                  ))}
-                                </Pie>
-                              </PieChart>
-                            </ResponsiveContainer>
-                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                              <p className="text-3xl font-black text-foreground">{sessions.length}</p>
-                              <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">Total</p>
-                            </div>
-                          </>
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                            <PieChart>
+                              <Pie
+                                data={generatePieData(sessions)}
+                                innerRadius={60}
+                                outerRadius={80}
+                                paddingAngle={8}
+                                dataKey="value"
+                                stroke="none"
+                              >
+                                {generatePieData(sessions).map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                content={({ active, payload }) => {
+                                  if (active && payload && payload.length) {
+                                    return (
+                                      <div className={cn(
+                                        "border p-3 rounded-xl shadow-2xl backdrop-blur-xl",
+                                        settings.dark_mode ? "bg-[#161B22]/90 border-white/10" : "bg-white/90 border-gray-200"
+                                      )}>
+                                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">{payload[0].name}</p>
+                                        <p className="text-lg font-black text-foreground">{payload[0].value} Sessions</p>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                }}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
                         ) : (
-                          <div className="h-full flex flex-col items-center justify-center opacity-20">
-                            <p className="text-5xl font-bold">0</p>
-                            <p className="text-[10px] font-bold text-gray-500 uppercase">Total</p>
+                          <div className="h-full flex items-center justify-center">
+                            <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">No data available</p>
+                          </div>
+                        )}
+                        {sessions.length > 0 && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total</p>
+                            <p className="text-2xl font-black text-foreground">{sessions.length}</p>
                           </div>
                         )}
                       </div>
+
                       <div className="space-y-3">
-                        {generatePieData(sessions).slice(0, 4).map((entry, index) => (
-                          <div key={`pie-item-${index}-${entry.name}`} className="flex items-center justify-between group/item cursor-pointer" onClick={() => setDetailModalData({ 
-                            type: 'subject', 
-                            data: { 
-                              title: entry.name, 
-                              count: entry.value,
-                              completedCount: entry.completedCount
-                            } 
-                          })}>
+                        {generatePieData(sessions).slice(0, 3).map((item, index) => (
+                          <div key={item.name} className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                              <span className="text-xs font-bold text-gray-400 light:text-gray-600 truncate max-w-[80px]">{entry.name}</span>
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                              <span className="text-xs font-bold text-gray-400 truncate max-w-[120px]">{item.name}</span>
                             </div>
-                            <span className="text-[10px] font-black text-foreground bg-white/5 light:bg-gray-100 px-2 py-0.5 rounded-full">
-                              {Math.round((entry.value / sessions.length) * 100)}%
-                            </span>
+                            <span className="text-xs font-black text-foreground">{Math.round((item.value / sessions.length) * 100)}%</span>
                           </div>
                         ))}
                       </div>
@@ -2739,34 +3388,41 @@ export default function App() {
                   </Card>
                 </div>
 
-                <Card>
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-2">
-                      <Calendar size={18} className="text-emerald-400" />
-                      <h3 className="font-bold text-foreground">Recent Activity</h3>
+                <Card className="p-6">
+                  <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-400/10 flex items-center justify-center">
+                        <Calendar size={20} className="text-emerald-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-black text-foreground uppercase tracking-wider text-sm">Recent Activity</h3>
+                        <p className="text-xs text-gray-500 font-bold">Your latest study sessions</p>
+                      </div>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Last 6 Sessions</span>
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Last 6 Sessions</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {sessions.slice(-6).reverse().map((s, index) => (
                       <button 
                         key={s.id + '-' + index} 
                         onClick={() => setDetailModalData({ type: 'activity', data: s })}
-                        className="flex items-center gap-4 p-4 bg-white/[0.03] light:bg-gray-50 rounded-2xl border border-white/5 light:border-gray-200 hover:bg-white/[0.08] light:hover:bg-gray-100 transition-all text-left active:scale-95"
+                        className="flex items-center gap-4 p-4 bg-white/[0.03] light:bg-gray-50 rounded-2xl border border-white/5 light:border-gray-200 hover:bg-white/[0.08] light:hover:bg-gray-100 transition-all text-left active:scale-95 group"
                       >
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${s.color}20`, color: s.color }}>
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-lg transition-transform group-hover:scale-110" style={{ backgroundColor: `${s.color}20`, color: s.color }}>
                           <IconRenderer name={s.icon} size={24} />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-bold text-sm truncate text-foreground">{s.subject}</p>
-                          <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{format(new Date(s.date), 'MMM d • h:mm a')}</p>
+                          <p className="font-black text-sm truncate text-foreground tracking-tight">{s.subject}</p>
+                          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{format(new Date(s.date), 'MMM d • h:mm a')}</p>
                         </div>
                       </button>
                     ))}
                     {sessions.length === 0 && (
-                      <div className="col-span-full py-12 flex flex-col items-center justify-center text-gray-500 space-y-2">
-                        <Activity size={32} className="opacity-20" />
-                        <p className="italic text-sm">No activity recorded yet.</p>
+                      <div className="col-span-full py-16 flex flex-col items-center justify-center text-gray-500 space-y-4">
+                        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center">
+                          <Activity size={32} className="opacity-20" />
+                        </div>
+                        <p className="font-bold text-sm uppercase tracking-widest opacity-40">No activity recorded yet</p>
                       </div>
                     )}
                   </div>
@@ -2784,14 +3440,14 @@ export default function App() {
                 transition={{ duration: 0.2, ease: "easeOut" }}
                 className="p-6 md:p-10 space-y-8 overflow-x-hidden"
               >
-                <header className="flex justify-between items-center">
-                  <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-foreground">Settings</h1>
+                <header className="flex justify-between items-center py-6">
+                  <h1 className="text-4xl md:text-6xl font-black tracking-tight text-foreground">Settings</h1>
                   <div className="flex gap-3">
                     <button 
                       onClick={handleManualSync}
                       disabled={isSyncing}
                       className={cn(
-                        "w-14 h-14 flex items-center justify-center bg-card light:bg-white rounded-full border border-white/5 light:border-gray-200 text-gray-400 hover:text-primary transition-all relative shadow-sm",
+                        "w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card light:bg-white rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-gray-400 hover:text-primary transition-all relative shadow-xl shadow-black/10 active:scale-95",
                         isSyncing && "animate-spin text-primary"
                       )}
                       title="Sync Data"
@@ -2800,12 +3456,12 @@ export default function App() {
                     </button>
                     <button 
                       onClick={() => setIsTrashOpen(true)}
-                      className="w-14 h-14 flex items-center justify-center bg-card light:bg-white rounded-full border border-white/5 light:border-gray-200 text-gray-400 hover:text-primary transition-all relative shadow-sm"
+                      className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card light:bg-white rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-gray-400 hover:text-primary transition-all relative shadow-xl shadow-black/10 active:scale-95"
                       title="Recycle Bin"
                     >
                       <Trash2 size={24} />
                       {trash.length > 0 && (
-                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-danger text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-background">
+                        <span className="absolute -top-1 -right-1 w-6 h-6 bg-danger text-white text-[10px] font-black rounded-full flex items-center justify-center border-4 border-background">
                           {trash.length}
                         </span>
                       )}
@@ -2813,167 +3469,135 @@ export default function App() {
                   </div>
                 </header>
 
-                <div className="flex flex-col lg:flex-row gap-8">
-                    {/* Settings Sidebar */}
-                    <div className="w-full lg:w-72 space-y-3">
+                <div className="max-w-3xl mx-auto space-y-8">
+                  <Card className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
+                          <Languages size={20} />
+                        </div>
+                        <span className="font-bold text-foreground">Language</span>
+                      </div>
                       <button 
-                        onClick={() => setActiveSettingsSection('preferences')}
+                        onClick={() => setSettings(s => ({ ...s, language: s.language === 'en' ? 'bn' : 'en' }))}
+                        className="bg-primary text-white px-4 py-2 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity"
+                      >
+                        {settings.language === 'en' ? 'বাংলা' : 'English'}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
+                          {settings.dark_mode ? <Moon size={20} /> : <Sun size={20} />}
+                        </div>
+                        <span className="font-bold text-foreground">Theme</span>
+                      </div>
+                      <div 
+                        onClick={() => setSettings(s => ({ ...s, dark_mode: !s.dark_mode }))}
                         className={cn(
-                          "w-full p-5 rounded-[32px] flex items-center justify-between transition-all group",
-                          activeSettingsSection === 'preferences' 
-                            ? "bg-primary text-white shadow-2xl shadow-primary/30" 
-                            : "bg-white/5 light:bg-gray-100 text-gray-400 hover:bg-white/10 light:hover:bg-gray-200"
+                          "w-12 h-6 rounded-full relative p-1 cursor-pointer transition-colors",
+                          settings.dark_mode ? "bg-primary" : "bg-gray-300"
                         )}
                       >
-                        <div className="flex items-center gap-4">
-                          <div className={cn(
-                            "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
-                            activeSettingsSection === 'preferences' ? "bg-white/20" : "bg-white/5"
-                          )}>
-                            <SettingsIcon size={24} />
-                          </div>
-                          <div className="text-left">
-                            <p className={cn(
-                              "text-[10px] font-bold uppercase tracking-widest mb-0.5",
-                              activeSettingsSection === 'preferences' ? "text-white/60" : "text-gray-500"
-                            )}>Preferences</p>
-                            <p className="font-bold text-lg">General</p>
-                          </div>
+                        <motion.div 
+                          animate={{ x: settings.dark_mode ? 24 : 0 }}
+                          className="w-4 h-4 bg-white rounded-full shadow-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
+                          <Bell size={20} />
                         </div>
-                        <ChevronRight size={20} className={cn(
-                          "transition-transform",
-                          activeSettingsSection === 'preferences' ? "translate-x-1" : "opacity-0 group-hover:opacity-100"
-                        )} />
+                        <div className="flex flex-col">
+                          <span className="font-bold text-foreground">Notification Panel</span>
+                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Smart Reminders</span>
+                        </div>
+                      </div>
+                      <div 
+                        onClick={() => setSettings(s => ({ ...s, notifications: !s.notifications }))}
+                        className={cn(
+                          "w-12 h-6 rounded-full relative p-1 cursor-pointer transition-colors",
+                          settings.notifications ? "bg-primary" : "bg-gray-300"
+                        )}
+                      >
+                        <motion.div 
+                          animate={{ x: settings.notifications ? 24 : 0 }}
+                          className="w-4 h-4 bg-white rounded-full shadow-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                          <RefreshCw size={20} className={isSyncing ? "animate-spin" : ""} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="font-bold text-foreground">Data Sync</span>
+                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Supabase Cloud</span>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={handleManualSync}
+                        disabled={isSyncing || isGuestMode}
+                        className={cn(
+                          "px-4 py-2 rounded-xl font-bold text-sm transition-all",
+                          isGuestMode 
+                            ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                            : "bg-primary text-white hover:opacity-90 active:scale-95"
+                        )}
+                      >
+                        {isSyncing ? 'Syncing...' : 'Sync Now'}
                       </button>
                     </div>
 
-                    {/* Settings Content */}
-                    <div className="flex-1">
-                      <AnimatePresence mode="wait">
-                        {activeSettingsSection === 'preferences' && (
-                          <motion.div
-                          key="preferences-section"
-                          initial={{ opacity: 0, x: 20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: -20 }}
-                          transition={{ duration: 0.2 }}
+                    <div className="pt-8 border-t border-white/10 light:border-gray-200">
+                      <div className="bg-white/5 light:bg-white p-8 rounded-3xl border border-white/10 light:border-gray-200 flex flex-col items-center gap-6 shadow-sm">
+                        <div className="flex flex-col items-center gap-4">
+                          <div className={cn(
+                            "w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner",
+                            isGuestMode ? "bg-primary/10 text-primary" : "bg-red-500/10 text-red-500"
+                          )}>
+                            {isGuestMode ? <LogIn size={28} /> : <LogOut size={28} />}
+                          </div>
+                          <div className="flex flex-col items-center text-center">
+                            <span className="font-bold text-foreground text-xl leading-tight">
+                              {isGuestMode ? 'Guest Mode' : 'Account Session'}
+                            </span>
+                            <span className="text-sm text-gray-500 font-bold uppercase tracking-wider mt-2">
+                              {isGuestMode ? 'Sign in to sync data' : user?.email}
+                            </span>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={isGuestMode ? () => { setIsGuestMode(false); setUser(null); } : handleSignOut}
+                          className={cn(
+                            "w-full max-w-xs px-8 py-4 rounded-2xl font-bold text-base transition-all flex items-center justify-center gap-3 shadow-md active:scale-95 border",
+                            isGuestMode 
+                              ? "bg-primary text-white border-primary shadow-primary/20 hover:bg-primary/90" 
+                              : "bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white hover:border-red-500"
+                          )}
                         >
-                          <Card className="space-y-6">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
-                                  <Languages size={20} />
-                                </div>
-                                <span className="font-bold text-foreground">Language</span>
-                              </div>
-                              <button 
-                                onClick={() => setSettings(s => ({ ...s, language: s.language === 'en' ? 'bn' : 'en' }))}
-                                className="bg-primary text-white px-4 py-2 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity"
-                              >
-                                {settings.language === 'en' ? 'বাংলা' : 'English'}
-                              </button>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
-                                  {settings.dark_mode ? <Moon size={20} /> : <Sun size={20} />}
-                                </div>
-                                <span className="font-bold text-foreground">Theme</span>
-                              </div>
-                              <div 
-                                onClick={() => setSettings(s => ({ ...s, dark_mode: !s.dark_mode }))}
-                                className={cn(
-                                  "w-12 h-6 rounded-full relative p-1 cursor-pointer transition-colors",
-                                  settings.dark_mode ? "bg-primary" : "bg-gray-300"
-                                )}
-                              >
-                                <motion.div 
-                                  animate={{ x: settings.dark_mode ? 24 : 0 }}
-                                  className="w-4 h-4 bg-white rounded-full shadow-sm" 
-                                />
-                              </div>
-                            </div>
+                          {isGuestMode ? <LogIn size={20} /> : <LogOut size={20} />}
+                          {isGuestMode ? 'Sign In' : 'Log Out'}
+                        </button>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
 
-                            <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
-                                  <Bell size={20} />
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-foreground">Notification Panel</span>
-                                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Smart Reminders</span>
-                                </div>
-                              </div>
-                              <div 
-                                onClick={() => setSettings(s => ({ ...s, notifications: !s.notifications }))}
-                                className={cn(
-                                  "w-12 h-6 rounded-full relative p-1 cursor-pointer transition-colors",
-                                  settings.notifications ? "bg-primary" : "bg-gray-300"
-                                )}
-                              >
-                                <motion.div 
-                                  animate={{ x: settings.notifications ? 24 : 0 }}
-                                  className="w-4 h-4 bg-white rounded-full shadow-sm" 
-                                />
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                                  <RefreshCw size={20} className={isSyncing ? "animate-spin" : ""} />
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-foreground">Data Sync</span>
-                                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Supabase Cloud</span>
-                                </div>
-                              </div>
-                              <button 
-                                onClick={handleManualSync}
-                                disabled={isSyncing || isGuestMode}
-                                className={cn(
-                                  "px-4 py-2 rounded-xl font-bold text-sm transition-all",
-                                  isGuestMode 
-                                    ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
-                                    : "bg-primary text-white hover:opacity-90 active:scale-95"
-                                )}
-                              >
-                                {isSyncing ? 'Syncing...' : 'Sync Now'}
-                              </button>
-                            </div>
-
-
-                            <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-danger/10 rounded-xl flex items-center justify-center text-danger">
-                                  <LogOut size={20} />
-                                </div>
-                                <span className="font-bold">Account</span>
-                              </div>
-                              <button 
-                                onClick={handleSignOut}
-                                className="bg-danger/10 text-danger px-4 py-2 rounded-xl font-bold text-sm hover:bg-danger/20 transition-all flex items-center gap-2"
-                              >
-                                <LogOut size={14} />
-                                Log Out
-                              </button>
-                            </div>
-                          </Card>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </div>
-
-            <div className="mt-12 text-left opacity-50 space-y-1">
-              <p className="text-sm font-medium">Developed by Sadikul I. Saikat</p>
-              <p className="text-xs">© 2026 Study Routine All rights reserved.</p>
-            </div>
-          </motion.div>
-        )}
-          </AnimatePresence>
-        </div>
-      </main>
+                  <div className="mt-12 text-left opacity-50 space-y-1">
+                    <p className="text-sm font-medium">Developed by Sadikul I. Saikat</p>
+                    <p className="text-xs">© 2026 Study Routine All rights reserved.</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </main>
 
       {/* Detail Modal */}
       <AnimatePresence>
@@ -3230,10 +3854,10 @@ export default function App() {
 
       {/* Mobile Bottom Nav */}
       <nav className={cn(
-        "md:hidden fixed bottom-0 left-0 right-0 backdrop-blur-xl px-6 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] flex justify-around items-center z-[100] transform-gpu translate-z-0 pointer-events-auto transition-colors duration-300",
+        "md:hidden fixed bottom-0 left-0 right-0 backdrop-blur-2xl px-6 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-around items-center z-[100] transform-gpu translate-z-0 pointer-events-auto transition-all duration-500",
         settings.dark_mode 
-          ? "bg-[#0A0E14]/95 border-t border-white/5" 
-          : "bg-white/95 border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.03)]"
+          ? "bg-[#0A0E14]/90 border-t border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]" 
+          : "bg-white/90 border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]"
       )}>
         <NavButton active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon={<HomeIcon />} label="HOME" darkMode={settings.dark_mode} />
         <NavButton active={activeTab === 'routine'} onClick={() => setActiveTab('routine')} icon={<Calendar />} label="ROUTINE" darkMode={settings.dark_mode} />
@@ -3300,6 +3924,7 @@ export default function App() {
         sessionsForDate={sessionsForDate}
         daysWithSessions={daysWithSessions}
         setDetailModalData={setDetailModalData}
+        routines={routines}
       />
 
       {/* Modal */}
@@ -3335,6 +3960,35 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      <ScheduleModal 
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
+        schedules={schedules}
+        onSave={(item) => {
+          const newSchedules = [...schedules, item].sort((a, b) => a.start_time.localeCompare(b.start_time));
+          setSchedules(newSchedules);
+          storage.saveSchedule(user?.id || 'guest_user', item);
+        }}
+        onDelete={(id) => {
+          const newSchedules = schedules.filter(s => s.id !== id);
+          setSchedules(newSchedules);
+          storage.deleteSchedule(user?.id || 'guest_user', id);
+        }}
+        darkMode={settings.dark_mode}
+      />
+      <PrayerModal 
+        isOpen={isPrayerModalOpen}
+        onClose={() => setIsPrayerModalOpen(false)}
+        settings={prayerSettings}
+        onSave={async (newSettings: PrayerSettings) => {
+          setPrayerSettings(newSettings);
+          setIsPrayerModalOpen(false);
+          if (user) {
+            await storage.savePrayerSettings(user.id, newSettings);
+          }
+        }}
+        darkMode={settings.dark_mode}
+      />
     </div>
   );
 }
@@ -3342,6 +3996,214 @@ export default function App() {
 // --- Sub-components ---
 
 // --- Sub-components ---
+
+interface ScheduleModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  schedules: ScheduleItem[];
+  onSave: (schedule: ScheduleItem) => void;
+  onDelete: (id: string) => void;
+  darkMode: boolean;
+}
+
+function ScheduleModal({ isOpen, onClose, schedules, onSave, onDelete, darkMode }: ScheduleModalProps) {
+  const [startTime, setStartTime] = useState('08:00');
+  const [endTime, setEndTime] = useState('09:00');
+  const [task, setTask] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const formatTo12h = (time: string) => {
+    if (!time) return '';
+    const [hours, minutes] = time.split(':');
+    const h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${minutes} ${ampm}`;
+  };
+
+  const handleSubmit = () => {
+    if (!task) return;
+    const schedule: ScheduleItem = {
+      id: editingId || Math.random().toString(36).substr(2, 9),
+      user_id: '', // Will be set by storage.saveSchedule
+      start_time: startTime,
+      end_time: endTime,
+      task,
+      created_at: new Date().toISOString()
+    };
+    onSave(schedule);
+    setTask('');
+    setEditingId(null);
+    setShowAddForm(false);
+  };
+
+  const handleEdit = (item: ScheduleItem) => {
+    setStartTime(item.start_time);
+    setEndTime(item.end_time);
+    setTask(item.task);
+    setEditingId(item.id);
+    setShowAddForm(true);
+  };
+
+  const handleToggleForm = () => {
+    if (showAddForm && editingId) {
+      setEditingId(null);
+      setTask('');
+    }
+    setShowAddForm(!showAddForm);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center p-0 md:p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className={cn(
+          "w-full max-w-lg rounded-t-[2.5rem] md:rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[95vh] md:max-h-[90vh]",
+          darkMode ? "bg-slate-900 border-t md:border border-white/10" : "bg-white border-t md:border border-gray-200"
+        )}
+      >
+        <div className="p-6 md:p-8 flex flex-col h-full overflow-hidden">
+          <div className="flex items-center justify-between mb-6 md:mb-8 shrink-0">
+            <div className="flex items-center gap-4">
+              <div>
+                <h2 className={cn("text-2xl font-black tracking-tight", darkMode ? "text-white" : "text-gray-900")}>Daily Schedule</h2>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-1">Time Blocking</p>
+              </div>
+              <button 
+                onClick={handleToggleForm}
+                className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95",
+                  showAddForm ? "bg-primary text-white" : "bg-primary/10 text-primary hover:bg-primary/20"
+                )}
+                title={editingId ? "Cancel Edit" : "Add to Schedule"}
+              >
+                {editingId ? <X size={24} strokeWidth={2.5} /> : <PlusCircle size={24} strokeWidth={2.5} />}
+              </button>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-xl transition-colors text-gray-400">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto pr-1 md:pr-2 space-y-6 scrollbar-hide pb-8">
+            <AnimatePresence>
+              {showAddForm && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0, marginBottom: 0 }}
+                  animate={{ height: 'auto', opacity: 1, marginBottom: 12 }}
+                  exit={{ height: 0, opacity: 0, marginBottom: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className={cn(
+                    "p-5 md:p-6 rounded-3xl space-y-4",
+                    darkMode ? "bg-white/5 border border-white/5" : "bg-gray-50 border border-gray-200"
+                  )}>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Start Time</label>
+                        <input 
+                          type="time" 
+                          value={startTime}
+                          onChange={(e) => setStartTime(e.target.value)}
+                          className={cn(
+                            "w-full p-5 rounded-2xl outline-none border transition-all font-bold",
+                            darkMode ? "bg-slate-800 border-white/5 text-white focus:border-primary/50" : "bg-white border-gray-200 text-gray-900 focus:border-primary/50"
+                          )}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">End Time</label>
+                        <input 
+                          type="time" 
+                          value={endTime}
+                          onChange={(e) => setEndTime(e.target.value)}
+                          className={cn(
+                            "w-full p-5 rounded-2xl outline-none border transition-all font-bold",
+                            darkMode ? "bg-slate-800 border-white/5 text-white focus:border-primary/50" : "bg-white border-gray-200 text-gray-900 focus:border-primary/50"
+                          )}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">What will you do?</label>
+                      <textarea 
+                        value={task}
+                        onChange={(e) => setTask(e.target.value)}
+                        placeholder="e.g. Morning Study Session"
+                        className={cn(
+                          "w-full p-4 rounded-2xl outline-none border transition-all font-bold min-h-[100px] resize-none",
+                          darkMode ? "bg-slate-800 border-white/5 text-white focus:border-primary/50" : "bg-white border-gray-200 text-gray-900 focus:border-primary/50"
+                        )}
+                      />
+                    </div>
+                    <button 
+                      onClick={handleSubmit}
+                      className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm tracking-widest hover:opacity-90 transition-all shadow-lg shadow-primary/20 active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      {editingId ? <RefreshCw size={18} strokeWidth={3} /> : <Plus size={18} strokeWidth={3} />}
+                      {editingId ? 'UPDATE SCHEDULE' : 'ADD TO SCHEDULE'}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="space-y-3">
+              {schedules.length > 0 ? (
+                schedules.map((item) => (
+                  <div 
+                    key={item.id}
+                    className={cn(
+                      "p-4 rounded-2xl flex items-center justify-between group transition-all",
+                      darkMode ? "bg-white/5 hover:bg-white/10" : "bg-gray-50 hover:bg-gray-100"
+                    )}
+                  >
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className="w-20 h-20 rounded-2xl bg-primary/10 flex flex-col items-center justify-center text-primary shrink-0">
+                        <span className="text-[11px] font-black leading-none">{formatTo12h(item.start_time)}</span>
+                        <div className="w-6 h-[1px] bg-primary/30 my-2" />
+                        <span className="text-[11px] font-black leading-none">{formatTo12h(item.end_time)}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className={cn("font-bold text-sm break-words", darkMode ? "text-white" : "text-gray-900")}>{item.task}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <button 
+                        onClick={() => handleEdit(item)}
+                        className="p-2 text-gray-500 hover:text-primary transition-colors"
+                        title="Edit"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button 
+                        onClick={() => onDelete(item.id)}
+                        className="p-2 text-gray-500 hover:text-red-500 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 opacity-30">
+                  <Clock size={48} className="mb-4" />
+                  <p className="text-sm font-bold text-center">No schedule items yet</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 interface FullCalendarModalProps {
   isOpen: boolean;
@@ -3355,6 +4217,7 @@ interface FullCalendarModalProps {
   sessionsForDate: (date: Date) => StudySession[];
   daysWithSessions: Set<string>;
   setDetailModalData: (data: { type: 'stat' | 'subject' | 'activity' | 'trend'; data: any } | null) => void;
+  routines: RoutineItem[];
 }
 
 function FullCalendarModal({ 
@@ -3390,7 +4253,8 @@ function FullCalendarContent({
   calendarDays, 
   sessionsForDate,
   daysWithSessions,
-  setDetailModalData
+  setDetailModalData,
+  routines
 }: Omit<FullCalendarModalProps, 'isOpen'>) {
   const previewListRef = useRef<HTMLDivElement>(null);
   const [isCalendarCollapsed, setIsCalendarCollapsed] = useState(false);
@@ -3463,7 +4327,12 @@ function FullCalendarContent({
               const isCurrentMonth = isSameMonth(day, calendarMonth);
               const isSel = isSameDay(day, selectedDate);
               const isTod = isToday(day);
-              const hasSess = daysWithSessions.has(format(day, 'yyyy-MM-dd'));
+              const dateKey = format(day, 'yyyy-MM-dd');
+              const hasSess = daysWithSessions.has(dateKey);
+
+              // Check if this day is a routine start or end date specifically for marking
+              const isRoutineStart = routines.some(r => !r.deleted_at && r.date === dateKey);
+              const isRoutineEnd = routines.some(r => !r.deleted_at && r.end_date === dateKey);
 
               return (
                 <button
@@ -3478,14 +4347,26 @@ function FullCalendarContent({
                     isSel 
                       ? "bg-danger text-white rounded-full shadow-lg shadow-danger/20 scale-105" 
                       : hasSess 
-                        ? "bg-danger/15 text-danger rounded-full" 
+                        ? "bg-danger/10 text-danger rounded-full" 
                         : "rounded-xl md:rounded-2xl hover:bg-white/5 text-gray-300",
                     isTod && !isSel && "border border-primary/50",
                     isTod && !isSel && !hasSess && "text-primary rounded-xl md:rounded-2xl"
                   )}
                 >
-                  <span className="text-base md:text-lg font-bold">{format(day, 'd')}</span>
-                  {/* Checkmark removed as per user request to replace with red circle for selection */}
+                  <span className="text-base md:text-lg font-bold z-10">{format(day, 'd')}</span>
+                  
+                  {/* Visual indicators for routine start/end */}
+                  {!isSel && (isRoutineStart || isRoutineEnd) && (
+                    <div className={cn(
+                      "absolute inset-0 rounded-full border-2 border-dashed pointer-events-none",
+                      isRoutineStart ? "border-emerald-500/40" : "border-amber-500/40"
+                    )} />
+                  )}
+
+                  {/* Dot indicator for sessions/routines */}
+                  {hasSess && !isSel && (
+                    <div className="absolute bottom-1.5 w-1 h-1 bg-danger rounded-full" />
+                  )}
                 </button>
               );
             })}
@@ -3570,21 +4451,29 @@ function FullCalendarContent({
 
 function SidebarLink({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
-    <motion.button 
-      whileHover={{ x: 4 }}
-      whileTap={{ scale: 0.98 }}
+    <button 
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-300 font-bold",
+        "w-full flex items-center gap-4 px-5 py-4 rounded-[1.25rem] transition-all group active:scale-95 relative overflow-hidden",
         active 
-          ? "bg-primary text-white shadow-lg shadow-primary/20" 
-          : "text-gray-400 hover:bg-white/5 hover:text-white light:hover:bg-gray-100 light:hover:text-gray-900"
+          ? "bg-primary text-white shadow-xl shadow-primary/20" 
+          : "text-gray-500 hover:bg-white/5 light:hover:bg-gray-100 hover:text-foreground"
       )}
     >
-      {React.cloneElement(icon as React.ReactElement, { size: 22 })}
-      <span>{label}</span>
-      {active && <motion.div layoutId="sidebar-active" className="ml-auto w-1.5 h-1.5 bg-white light:bg-gray-900 rounded-full" />}
-    </motion.button>
+      {active && (
+        <motion.div 
+          layoutId="sidebar-active-pill"
+          className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-white rounded-r-full"
+        />
+      )}
+      <div className={cn(
+        "transition-transform duration-300 group-hover:scale-110",
+        active ? "text-white" : "text-gray-400 group-hover:text-primary"
+      )}>
+        {React.cloneElement(icon as React.ReactElement, { size: 22, strokeWidth: active ? 2.5 : 2 })}
+      </div>
+      <span className={cn("text-sm transition-all", active ? "font-black tracking-tight" : "font-bold opacity-80")}>{label}</span>
+    </button>
   );
 }
 
@@ -3593,48 +4482,70 @@ function SidebarLink({ active, onClick, icon, label }: { active: boolean; onClic
 function NavButton({ active, onClick, icon, label, darkMode }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; darkMode: boolean }) {
   return (
     <motion.button 
-      whileTap={{ scale: 0.92 }}
+      whileTap={{ scale: 0.9 }}
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center gap-1.5 transition-all duration-300",
+        "flex flex-col items-center gap-1 transition-all duration-500 relative",
         active 
-          ? "text-white" 
+          ? "text-primary" 
           : (darkMode ? "text-gray-500" : "text-gray-400")
       )}
     >
       <div className={cn(
-        "w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-300",
+        "w-12 h-12 flex items-center justify-center rounded-[1.25rem] transition-all duration-500",
         active 
-          ? "bg-primary shadow-lg shadow-primary/20" 
-          : (darkMode ? "bg-transparent" : "bg-gray-100")
+          ? "bg-primary/10 scale-110" 
+          : (darkMode ? "bg-transparent" : "bg-transparent")
       )}>
-        {React.cloneElement(icon as React.ReactElement, { size: 24, color: active ? 'white' : undefined })}
+        {React.cloneElement(icon as React.ReactElement, { 
+          size: 22, 
+          strokeWidth: active ? 2.5 : 2,
+          className: cn("transition-all duration-500", active ? "text-primary" : "text-current")
+        })}
       </div>
-      <span className="text-[9px] font-bold tracking-[0.1em]">{label}</span>
+      <span className={cn(
+        "text-[9px] font-black tracking-tighter transition-all duration-500",
+        active ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
+      )}>{label}</span>
     </motion.button>
   );
 }
 
-function StatCard({ icon, label, value, color, onClick }: { icon: React.ReactNode; label: string; value: string; color: string; onClick?: () => void }) {
+function StatCard({ icon, label, value, color, onClick, trend }: { icon: React.ReactNode; label: string; value: string; color: string; onClick?: () => void; trend?: { value: number; isUp: boolean } }) {
   return (
     <Card 
       onClick={onClick}
       className={cn(
-        "p-4 flex flex-col items-start gap-3 transition-all cursor-pointer active:scale-95",
-        "hover:bg-white/5 light:hover:bg-gray-50",
+        "p-5 flex flex-col items-start gap-4 transition-all cursor-pointer active:scale-95 group relative overflow-hidden",
+        "bg-white/5 border-white/5 hover:bg-white/[0.08] hover:border-white/10",
+        "light:bg-gray-50 light:border-gray-200 light:hover:bg-gray-100",
         onClick && "cursor-pointer"
       )}
     >
+      <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-primary/10 transition-colors" />
+      
       <div className={cn(
-        "w-10 h-10 rounded-xl flex items-center justify-center",
-        "bg-white/5 light:bg-gray-100",
+        "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110",
+        "bg-white/5 light:bg-white",
         color
       )}>
         {icon}
       </div>
-      <div>
-        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{label}</p>
-        <p className="text-2xl font-bold text-foreground">{value}</p>
+      
+      <div className="w-full">
+        <div className="flex items-center justify-between w-full mb-1">
+          <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">{label}</p>
+          {trend && (
+            <div className={cn(
+              "flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
+              trend.isUp ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
+            )}>
+              {trend.isUp ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+              {trend.value}%
+            </div>
+          )}
+        </div>
+        <p className="text-3xl font-black text-foreground tracking-tight">{value}</p>
       </div>
     </Card>
   );

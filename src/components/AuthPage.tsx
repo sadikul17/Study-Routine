@@ -132,6 +132,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       setError("Supabase is not correctly configured. Please check your environment variables.");
       return;
     }
+    if (!email.trim() || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     setIsLoading(true);
     setError(null);
     setSuccess(null);
@@ -150,6 +159,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         });
         if (error) throw error;
       } else {
+        if (password.length < 6) {
+          setError('Password must be at least 6 characters.');
+          setIsLoading(false);
+          return;
+        }
         // For Android/iOS apps, we need to ensure the redirect URL is correct
         // Capacitor apps on Android usually use http://localhost
         const redirectTo = Capacitor.isNativePlatform() ? 'http://localhost' : window.location.origin;
@@ -169,7 +183,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       if (message === 'Failed to fetch') {
         message = 'Network error. Please check your internet connection and ensure Supabase URL is reachable from your mobile device.';
       } else if (message === 'Invalid login credentials') {
-        message = 'Invalid email or password. Please check your credentials or use the "Forgot?" link to reset your password.';
+        message = 'Invalid email or password. Please check your credentials. If you haven\'t created an account yet, click the "Sign Up" button below.';
+      } else if (message === 'Email not confirmed') {
+        message = 'Your email address has not been confirmed yet. Please check your inbox for the confirmation link.';
       }
       setError(message || 'An unexpected error occurred during authentication.');
     } finally {

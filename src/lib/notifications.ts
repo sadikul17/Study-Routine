@@ -1,6 +1,6 @@
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { StudySession, RoutineItem, AppSettings } from '../types';
-import { isSameDay, parseISO, startOfDay } from 'date-fns';
+import { StudySession, RoutineItem, AppSettings, PrayerSettings, ScheduleItem } from '../types';
+import { isSameDay, parseISO, startOfDay, format, subMinutes } from 'date-fns';
 
 export const notificationService = {
   async requestPermissions() {
@@ -12,9 +12,18 @@ export const notificationService = {
     return true;
   },
 
-  async scheduleReminders(sessions: StudySession[], routines: RoutineItem[], settings: AppSettings) {
+  getScheduleNotificationMessage(task: string, _minutesBefore?: number) {
+    return task;
+  },
+
+  async scheduleReminders(
+    sessions: StudySession[], 
+    routines: RoutineItem[], 
+    settings: AppSettings, 
+    prayerSettings?: PrayerSettings,
+    schedules: ScheduleItem[] = []
+  ) {
     if (!settings.notifications) {
-      await LocalNotifications.cancel({ notifications: [{ id: 1 }, { id: 2 }] });
       const pending = await LocalNotifications.getPending();
       if (pending.notifications.length > 0) {
         await LocalNotifications.cancel(pending);
@@ -47,24 +56,31 @@ export const notificationService = {
     }
 
     const notifications = [];
-    const today = startOfDay(new Date());
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
 
     // Common notification properties for professional look
     const commonProps = {
-      smallIcon: 'ic_launcher', // Use the main app icon for notifications
-      iconColor: '#1E88E5', // Professional blue to match logo
+      smallIcon: 'ic_launcher', // Standard native icon reference
+      largeIcon: 'https://img.icons8.com/ios-filled/512/graduation-cap.png', // Clean graduation cap icon
+      iconColor: '#000000', // Black color to match the provided icon
       channelId: 'study_reminders',
       sound: settings.sound ? 'default' : undefined,
     };
 
     // 1. General Task Reminder (Home Page)
-    const pendingTasks = sessions.filter(s => !s.completed && isSameDay(parseISO(s.date), today));
+    const pendingTasks = sessions.filter(s => {
+      if (s.completed) return false;
+      const taskDateStr = s.date.includes('T') ? s.date.split('T')[0] : s.date;
+      return taskDateStr === todayStr;
+    });
+
     if (pendingTasks.length > 0) {
       const [hours, minutes] = settings.task_notification_time.split(':').map(Number);
       const scheduleDate = new Date();
       scheduleDate.setHours(hours, minutes, 0, 0);
 
-      if (scheduleDate < new Date()) {
+      if (scheduleDate < now) {
         scheduleDate.setDate(scheduleDate.getDate() + 1);
       }
 
@@ -73,7 +89,7 @@ export const notificationService = {
         title: 'Task Reminder',
         body: `You have ${pendingTasks.length} pending tasks for today. Don't forget to complete them!`,
         id: 1,
-        schedule: { at: scheduleDate, repeats: true, every: 'day', allowWhileIdle: true },
+        schedule: { at: scheduleDate, allowWhileIdle: true },
         extra: { type: 'tasks' },
         group: 'tasks',
         threadId: 'tasks',
@@ -87,7 +103,7 @@ export const notificationService = {
       const scheduleDate = new Date();
       scheduleDate.setHours(hours, minutes, 0, 0);
 
-      if (scheduleDate < new Date()) {
+      if (scheduleDate < now) {
         scheduleDate.setDate(scheduleDate.getDate() + 1);
       }
 
@@ -96,7 +112,7 @@ export const notificationService = {
         title: 'Task Reminder',
         body: `Time to check your study routines! You have ${activeRoutines.length} active routines.`,
         id: 2,
-        schedule: { at: scheduleDate, repeats: true, every: 'day', allowWhileIdle: true },
+        schedule: { at: scheduleDate, allowWhileIdle: true },
         extra: { type: 'routines' },
         group: 'routines',
         threadId: 'routines',
@@ -105,16 +121,15 @@ export const notificationService = {
 
     // 3. Specific Task Reminders
     sessions.filter(s => !s.completed && s.reminder_time).forEach(s => {
-      const [hours, minutes] = s.reminder_time!.split(':').map(Number);
-      const taskDate = new Date(s.date.includes('T') ? s.date : s.date + 'T00:00:00');
-      taskDate.setHours(hours, minutes, 0, 0);
+      const datePart = s.date.includes('T') ? s.date.split('T')[0] : s.date;
+      const taskDate = new Date(`${datePart}T${s.reminder_time}:00`);
 
-      if (taskDate > new Date()) {
+      if (taskDate > now) {
         notifications.push({
           ...commonProps,
           title: 'Task Reminder',
           body: `Subject : ${s.subject}\nchapter : ${s.chapter}`,
-          id: Math.abs(this.hashCode(s.id)),
+          id: Math.abs(this.hashCode(`task_${s.id}`)),
           schedule: { at: taskDate, allowWhileIdle: true },
           extra: { type: 'specific_task', id: s.id },
           group: 'specific_tasks',
@@ -125,16 +140,15 @@ export const notificationService = {
 
     // 4. Specific Routine Reminders
     routines.filter(r => !r.deleted_at && r.reminder_time).forEach(r => {
-      const [hours, minutes] = r.reminder_time!.split(':').map(Number);
-      const routineDate = new Date(r.date.includes('T') ? r.date : r.date + 'T00:00:00');
-      routineDate.setHours(hours, minutes, 0, 0);
+      const datePart = r.date.includes('T') ? r.date.split('T')[0] : r.date;
+      const routineDate = new Date(`${datePart}T${r.reminder_time}:00`);
 
-      if (routineDate > new Date()) {
+      if (routineDate > now) {
         notifications.push({
           ...commonProps,
           title: 'Task Reminder',
           body: `Subject : ${r.subject}\nchapter : ${r.chapter}`,
-          id: Math.abs(this.hashCode(r.id)),
+          id: Math.abs(this.hashCode(`routine_${r.id}`)),
           schedule: { at: routineDate, allowWhileIdle: true },
           extra: { type: 'specific_routine', id: r.id },
           group: 'specific_routines',
@@ -143,10 +157,83 @@ export const notificationService = {
       }
     });
 
+    // 5. Prayer Time Reminders
+    if (prayerSettings && prayerSettings.times) {
+      prayerSettings.times.filter(p => p.enabled && p.time).forEach(p => {
+        const [hours, minutes] = p.time.split(':').map(Number);
+        
+        // Schedule for today
+        const prayerDateToday = new Date();
+        prayerDateToday.setHours(hours, minutes, 0, 0);
+        
+        if (prayerDateToday > now) {
+          notifications.push({
+            ...commonProps,
+            title: `Time for ${p.name}`,
+            body: `It's ${p.time}. Time for your scheduled ${p.name}.`,
+            id: Math.abs(this.hashCode(`prayer_${p.name}_today`)),
+            schedule: { at: prayerDateToday, allowWhileIdle: true },
+            extra: { type: 'prayer_time', name: p.name },
+            group: 'prayers',
+            threadId: 'prayers',
+          });
+        }
+
+        // Also schedule for tomorrow to ensure continuity
+        const prayerDateTomorrow = new Date();
+        prayerDateTomorrow.setDate(prayerDateTomorrow.getDate() + 1);
+        prayerDateTomorrow.setHours(hours, minutes, 0, 0);
+        
+        notifications.push({
+          ...commonProps,
+          title: `Time for ${p.name}`,
+          body: `It's ${p.time}. Time for your scheduled ${p.name}.`,
+          id: Math.abs(this.hashCode(`prayer_${p.name}_tomorrow`)),
+          schedule: { at: prayerDateTomorrow, allowWhileIdle: true },
+          extra: { type: 'prayer_time', name: p.name },
+          group: 'prayers',
+          threadId: 'prayers',
+        });
+      });
+    }
+
+    // 6. Daily Schedule Reminders
+    schedules.forEach(item => {
+      const scheduleTimes = [
+        { time: item.start_time, label: 'Start' },
+        { time: item.end_time, label: 'End' },
+      ];
+
+      scheduleTimes.forEach((st) => {
+        const [hours, mins] = st.time.split(':').map(Number);
+        const scheduleDate = new Date();
+        scheduleDate.setHours(hours, mins, 0, 0);
+
+        if (scheduleDate > now) {
+          const body = item.task;
+          notifications.push({
+            ...commonProps,
+            title: st.label === 'Start' ? 'Schedule Start' : 'Schedule End',
+            body: body,
+            id: Math.abs(this.hashCode(`schedule_${item.id}_${st.label}`)),
+            schedule: { at: scheduleDate, allowWhileIdle: true },
+            extra: { type: 'schedule', id: item.id },
+            group: 'schedules',
+            threadId: 'schedules',
+          });
+        }
+      });
+    });
+
     if (notifications.length > 0) {
       try {
-        await LocalNotifications.schedule({ notifications: notifications as any });
-        console.log('Notifications scheduled successfully:', notifications.length);
+        // Sort by date and limit to 60 to avoid OS limits
+        const sortedNotifications = notifications
+          .sort((a, b) => (a.schedule?.at?.getTime() || 0) - (b.schedule?.at?.getTime() || 0))
+          .slice(0, 60);
+
+        await LocalNotifications.schedule({ notifications: sortedNotifications as any });
+        console.log('Notifications scheduled successfully:', sortedNotifications.length);
       } catch (error) {
         console.error('Error scheduling notifications:', error);
       }
@@ -183,12 +270,40 @@ export const notificationService = {
           body: `Subject : ${subject}\nchapter : ${chapter}`,
           schedule: { at: scheduleDate, allowWhileIdle: true },
           sound: 'default',
+          smallIcon: 'ic_launcher',
+          largeIcon: 'https://img.icons8.com/ios-filled/512/graduation-cap.png',
+          iconColor: '#000000',
           extra: { type: 'alarm' }
         }]
       });
       return true;
     } catch (error) {
       console.error('Error setting quick alarm:', error);
+      return false;
+    }
+  },
+
+  async notify(title: string, body: string, id: number = Math.floor(Math.random() * 10000)) {
+    const hasPermission = await this.requestPermissions();
+    if (!hasPermission) return;
+
+    try {
+      await LocalNotifications.schedule({
+        notifications: [{
+          id,
+          title,
+          body,
+          schedule: { at: new Date(Date.now() + 1000), allowWhileIdle: true },
+          sound: 'default',
+          smallIcon: 'ic_launcher',
+          largeIcon: 'https://img.icons8.com/ios-filled/512/graduation-cap.png',
+          iconColor: '#000000',
+          extra: { type: 'prayer_time' }
+        }]
+      });
+      return true;
+    } catch (error) {
+      console.error('Error sending immediate notification:', error);
       return false;
     }
   }

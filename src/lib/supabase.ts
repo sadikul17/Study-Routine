@@ -28,8 +28,8 @@ const capacitorStorage = {
 const isApp = Capacitor.isNativePlatform();
 
 export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder',
+  supabaseUrl,
+  supabaseAnonKey,
   {
     auth: {
       persistSession: true,
