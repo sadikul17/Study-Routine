@@ -9,3 +9,13 @@ BEGIN
         CREATE INDEX IF NOT EXISTS idx_sessions_routine_id ON sessions(routine_id);
     END IF;
 END $$;
+
+-- Add specific_dates column to routines table if it doesn't exist
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='routines' AND column_name='specific_dates') THEN
+        ALTER TABLE routines ADD COLUMN specific_dates JSONB;
+    END IF;
+END $$;
+
+

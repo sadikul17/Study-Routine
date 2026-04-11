@@ -119,23 +119,6 @@ const RoutineCard = ({
 }: any) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
-  let statusText = '';
-  let statusColor = '';
-  
-  if (routine.end_date) {
-    const today = startOfDay(new Date());
-    const end = startOfDay(new Date(routine.end_date));
-    const diff = differenceInDays(end, today);
-    
-    if (diff < 0) {
-      statusText = 'End';
-      statusColor = 'text-red-500';
-    } else {
-      statusText = diff.toString();
-      statusColor = 'text-orange-500';
-    }
-  }
-
   return (
     <div 
       key={`${routine.id}-${index}`}
@@ -153,19 +136,19 @@ const RoutineCard = ({
             darkMode ? "bg-white/5 text-white/50" : "bg-slate-100 text-slate-500"
           )}>
             <Calendar size={12} className="text-indigo-500" />
-            {format(new Date(routine.date), 'MMM d, yyyy')}
-          </div>
-
-          {statusText && (
-            <div className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-[0.15em] shrink-0",
-              darkMode ? "bg-white/5" : "bg-slate-100",
-              statusColor
-            )}>
-              <Clock size={10} />
-              {statusText} {statusText === 'End' ? '' : 'Days Left'}
+            <div className="flex flex-wrap gap-1 max-w-[200px]">
+              {routine.specific_dates && routine.specific_dates.length > 0 ? (
+                routine.specific_dates.sort().map((d: string, i: number) => (
+                  <span key={i} className="whitespace-nowrap">
+                    {format(new Date(d), 'MMM d')}
+                    {i < routine.specific_dates.length - 1 ? ',' : ''}
+                  </span>
+                ))
+              ) : (
+                format(new Date(routine.date), 'MMM d, yyyy')
+              )}
             </div>
-          )}
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -261,7 +244,7 @@ const RoutineCard = ({
             </button>
             {view === 'active' && (
               <button
-                onClick={() => onAddTask(routine.id, routine.subject, routine.chapter, routine.topics || '', routine.date, routine.end_date, routine.reminder_time)}
+                onClick={() => onAddTask(routine.id, routine.subject, routine.chapter, routine.topics || '', routine.date, routine.end_date, routine.reminder_time, routine.specific_dates)}
                 className={cn(
                   "p-3 rounded-2xl transition-all border active:scale-95 flex items-center justify-center",
                   darkMode 
@@ -583,7 +566,7 @@ const RoutinePage = ({
   onDeleteRoutine: (id: string) => Promise<void>,
   onRestoreRoutine: (id: string) => Promise<void>,
   onPermanentlyDeleteRoutine: (id: string) => Promise<void>,
-  onAddTask: (routineId: string, subject: string, chapter: string, topics: string, date: string, end_date?: string, reminder_time?: string) => Promise<void>,
+  onAddTask: (routineId: string, subject: string, chapter: string, topics: string, date: string, end_date?: string, reminder_time?: string, specific_dates?: string[]) => Promise<void>,
   onSync: () => Promise<void>,
   onOpenPrayerTimes: () => void,
   isSyncing: boolean,
@@ -596,8 +579,7 @@ const RoutinePage = ({
   const [chapter, setChapter] = useState('');
   const [topics, setTopics] = useState('');
   const [reminderTime, setReminderTime] = useState('');
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [selectedEndDate, setSelectedEndDate] = useState('');
+  const [selectedDates, setSelectedDates] = useState<string[]>([format(new Date(), 'yyyy-MM-dd')]);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -621,22 +603,30 @@ const RoutinePage = ({
   }, [calendarMonth]);
 
   useEffect(() => {
-    if (selectedDate) {
+    if (selectedDates.length > 0) {
       try {
-        const date = new Date(selectedDate);
+        const date = new Date(selectedDates[0]);
         if (!isNaN(date.getTime())) {
           setCalendarMonth(date);
         }
       } catch (e) {}
     }
-  }, [selectedDate]);
+  }, [selectedDates]);
 
   const allRoutines = useMemo(() => routines.filter(r => !r.deleted_at), [routines]);
 
   const activeRoutines = useMemo(() => routines.filter(r => {
     if (r.deleted_at) return false;
-    if (!r.end_date) return true;
+    
     const today = startOfDay(new Date());
+    
+    if (r.specific_dates && r.specific_dates.length > 0) {
+      const lastDateStr = [...r.specific_dates].sort().pop()!;
+      const lastDate = startOfDay(new Date(lastDateStr));
+      return differenceInDays(today, lastDate) <= 0;
+    }
+    
+    if (!r.end_date) return true;
     const end = startOfDay(new Date(r.end_date));
     // Stay in active until it ends
     return differenceInDays(today, end) <= 0;
@@ -644,8 +634,16 @@ const RoutinePage = ({
 
   const endedRoutines = useMemo(() => routines.filter(r => {
     if (r.deleted_at) return false;
-    if (!r.end_date) return false;
+    
     const today = startOfDay(new Date());
+    
+    if (r.specific_dates && r.specific_dates.length > 0) {
+      const lastDateStr = [...r.specific_dates].sort().pop()!;
+      const lastDate = startOfDay(new Date(lastDateStr));
+      return differenceInDays(today, lastDate) > 0;
+    }
+    
+    if (!r.end_date) return false;
     const end = startOfDay(new Date(r.end_date));
     // Move to ended after it ends
     return differenceInDays(today, end) > 0;
@@ -679,9 +677,33 @@ const RoutinePage = ({
       const baseRoutines = view === 'deleted' ? deletedRoutines : routines.filter(r => !r.deleted_at);
       
       // Filter routines by date range
-      const routinesToPrint = baseRoutines.filter(r => {
-        const rDate = startOfDay(new Date(r.date));
-        return rDate >= startDate && rDate <= endDate;
+      const routinesToPrint: RoutineItem[] = [];
+      baseRoutines.forEach(r => {
+        if (r.specific_dates && r.specific_dates.length > 0) {
+          const sortedDates = [...r.specific_dates].sort();
+          r.specific_dates.forEach(d => {
+            const dDate = startOfDay(new Date(d));
+            if (dDate >= startDate && dDate <= endDate) {
+              // Create a virtual routine for this date to fit the grouping logic
+              routinesToPrint.push({ 
+                ...r, 
+                date: d,
+                // Keep track of original range for display
+                original_start: sortedDates[0],
+                original_end: sortedDates[sortedDates.length - 1]
+              } as any);
+            }
+          });
+        } else {
+          const rDate = startOfDay(new Date(r.date));
+          if (rDate >= startDate && rDate <= endDate) {
+            routinesToPrint.push({
+              ...r,
+              original_start: r.date,
+              original_end: r.end_date
+            } as any);
+          }
+        }
       });
 
       if (routinesToPrint.length === 0) {
@@ -706,8 +728,8 @@ const RoutinePage = ({
       let currentChunk: string[] = [];
       let estimatedHeight = 0;
       // A4 is 210x297mm. At 800px width, height is ~1131px.
-      // We use a safe limit of 980px to account for margins and header/footer and prevent cutting.
-      const maxHeight = 980; 
+      // We use a safe limit of 920px to account for margins and header/footer and prevent cutting.
+      const maxHeight = 920; 
 
       allDatesToPrint.forEach(dateStr => {
         const dayRoutines = groupedRoutines[dateStr] || [];
@@ -757,8 +779,9 @@ const RoutinePage = ({
         tempContainer.style.fontFamily = '"Hind Siliguri", "Inter", sans-serif';
         
         let htmlContent = `
-          <div style="font-family: 'Hind Siliguri', 'Inter', sans-serif; color: #1e293b; background-color: #ffffff; padding: 40px; width: 800px; min-height: 1100px; display: flex; flex-direction: column; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #4f46e5; padding-bottom: 20px; margin-bottom: 20px;">
+          <div style="font-family: 'Hind Siliguri', 'Inter', sans-serif; color: #1e293b; background-color: #ffffff; padding: 30px 40px; width: 800px; min-height: 1120px; display: flex; flex-direction: column; box-sizing: border-box;">
+            ${i === 0 ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #4f46e5; padding-bottom: 15px; margin-bottom: 15px;">
               <div>
                 <h1 style="font-size: 34px; color: #4f46e5; margin: 0; font-weight: 900; letter-spacing: -0.04em; text-transform: uppercase;">Study Routine</h1>
                 <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
@@ -787,15 +810,21 @@ const RoutinePage = ({
                 <p style="font-size: 18px; font-weight: 900; margin: 0;">${differenceInDays(endDate, startDate) + 1} Days</p>
               </div>
             </div>
+            ` : `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; margin-bottom: 15px;">
+              <span style="font-size: 12px; color: #64748b; font-weight: 700;">Page ${i + 1} of ${dateChunks.length}</span>
+              <span style="font-size: 12px; color: #4f46e5; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">Study Routine Continued</span>
+            </div>
+            `}
             
             <div style="flex-grow: 1;">
               <table style="width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 24px; overflow: hidden; border: 1.5px solid #e2e8f0; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);">
                 <thead>
                   <tr style="background-color: #4f46e5; color: #ffffff;">
-                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">DATE</th>
-                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Subject</th>
-                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Chapter</th>
-                    <th style="padding: 22px 20px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900;">Topics & Details</th>
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">DATE</th>
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Subject</th>
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Chapter</th>
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900;">Topics & Details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -827,25 +856,23 @@ const RoutinePage = ({
                     <td style="padding: 30px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; border-right: 1.5px solid #f1f5f9; vertical-align: top; width: 150px; min-width: 150px;" rowspan="${dayRoutines.length}">
                       <div style="font-weight: 900; color: #1e293b; font-size: 20px; line-height: 1;">${format(new Date(dateStr), 'MMM d')}</div>
                       <div style="font-size: 12px; color: #64748b; margin-top: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2;">${format(new Date(dateStr), 'EEEE')}</div>
-                      <div style="margin-top: 20px; font-size: 11px; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; border-top: 2px solid #f1f5f9; padding-top: 12px; line-height: 1.5;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                          <span style="color: #94a3b8; font-weight: 700;">START</span>
-                          <span>${format(new Date(r.date), 'MMM d')}</span>
-                        </div>
-                        ${r.end_date ? `
-                        <div style="display: flex; justify-content: space-between;">
-                          <span style="color: #94a3b8; font-weight: 700;">END</span>
-                          <span>${format(new Date(r.end_date), 'MMM d')}</span>
-                        </div>
-                        ` : ''}
-                      </div>
                     </td>
                   ` : ''}
-                  <td style="padding: 25px 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; vertical-align: top;">
+                  <td style="padding: 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; vertical-align: top;">
                     <div style="color: #4f46e5; font-weight: 900; font-size: 16px; line-height: 1.2;">${r.subject}</div>
+                    <div style="margin-top: 10px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; display: flex; gap: 12px; border-top: 1px solid #f1f5f9; padding-top: 8px;">
+                      <div style="color: #10b981; display: flex; align-items: center; gap: 4px;">
+                        <span>${format(new Date((r as any).original_start), 'MMM d')}</span>
+                      </div>
+                      ${(r as any).original_end ? `
+                      <div style="color: #ef4444; display: flex; align-items: center; gap: 4px;">
+                        <span>${format(new Date((r as any).original_end), 'MMM d')}</span>
+                      </div>
+                      ` : ''}
+                    </div>
                   </td>
-                  <td style="padding: 25px 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; color: #334155; font-size: 15px; font-weight: 700; vertical-align: top; line-height: 1.4;">${r.chapter}</td>
-                  <td style="padding: 25px 20px; border-bottom: ${borderBottom}; color: #475569; font-size: 14px; vertical-align: top; line-height: 1.6; font-weight: 600;">
+                  <td style="padding: 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; color: #334155; font-size: 15px; font-weight: 700; vertical-align: top; line-height: 1.4;">${r.chapter}</td>
+                  <td style="padding: 20px; border-bottom: ${borderBottom}; color: #475569; font-size: 14px; vertical-align: top; line-height: 1.6; font-weight: 600;">
                     ${r.topics ? r.topics.split('\n').map(t => `<div style="margin-bottom: 6px; display: flex; gap: 8px;"><span style="color: #4f46e5; font-weight: 900;">&bull;</span><span>${t}</span></div>`).join('') : '<span style="color: #cbd5e1; font-style: italic;">No topics specified</span>'}
                   </td>
                 </tr>
@@ -922,19 +949,23 @@ const RoutinePage = ({
   };
 
   const handleAddNow = async () => {
-    if (!subject || !chapter) return;
+    if (!subject || !chapter || selectedDates.length === 0) return;
     setIsSaving(true);
     try {
+      const sortedDates = [...selectedDates].sort();
+      
       await onSaveRoutine({
         id: editingRoutineId || undefined,
         subject,
         chapter,
         topics,
-        date: selectedDate,
-        end_date: selectedEndDate || null,
+        date: sortedDates[0],
+        specific_dates: sortedDates,
+        end_date: null,
         reminder_time: reminderTime || null,
         countdown: 0
       });
+      
       resetForm();
     } finally {
       setIsSaving(false);
@@ -946,7 +977,7 @@ const RoutinePage = ({
     setChapter('');
     setTopics('');
     setReminderTime('');
-    setSelectedEndDate('');
+    setSelectedDates([format(new Date(), 'yyyy-MM-dd')]);
     setEditingRoutineId(null);
     setIsAdding(false);
   };
@@ -956,8 +987,7 @@ const RoutinePage = ({
     setSubject(routine.subject);
     setChapter(routine.chapter);
     setTopics(routine.topics || '');
-    setSelectedDate(routine.date);
-    setSelectedEndDate(routine.end_date || '');
+    setSelectedDates(routine.specific_dates || [routine.date]);
     setReminderTime(routine.reminder_time || '');
     setIsAdding(true);
   };
@@ -1193,41 +1223,10 @@ const RoutinePage = ({
                     />
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold uppercase tracking-wider opacity-60">Start Date</label>
-                      <div className="relative group">
-                        <input 
-                          type="date"
-                          value={selectedDate}
-                          onChange={(e) => setSelectedDate(e.target.value)}
-                          className={cn(
-                            "w-full px-4 py-2.5 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all",
-                            darkMode ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                          )}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold uppercase tracking-wider opacity-60">End Date</label>
-                      <div className="relative group">
-                        <input 
-                          type="date"
-                          value={selectedEndDate}
-                          onChange={(e) => setSelectedEndDate(e.target.value)}
-                          className={cn(
-                            "w-full px-4 py-2.5 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all",
-                            darkMode ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                          )}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
                   <div className="pt-2">
                     <button
                       onClick={handleAddNow}
-                      disabled={isSaving || !subject || !chapter}
+                      disabled={isSaving || !subject || !chapter || selectedDates.length === 0}
                       className="w-full py-3 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
                     >
                       {isSaving ? (editingRoutineId ? "Updating..." : "Adding...") : (editingRoutineId ? "Update Routine" : "Add Routine")}
@@ -1267,24 +1266,17 @@ const RoutinePage = ({
                       ))}
                       {calendarDays.map((day, i) => {
                         const dateStr = format(day, 'yyyy-MM-dd');
-                        const isStart = selectedDate === dateStr;
-                        const isEnd = selectedEndDate === dateStr;
+                        const isSelected = selectedDates.includes(dateStr);
                         const isCurrentMonth = isSameMonth(day, calendarMonth);
                         
-                        let isInRange = false;
-                        if (selectedDate && selectedEndDate) {
-                          try {
-                            const start = startOfDay(new Date(selectedDate));
-                            const end = startOfDay(new Date(selectedEndDate));
-                            if (isBefore(start, end) || isSameDay(start, end)) {
-                              isInRange = isWithinInterval(startOfDay(day), { start, end });
-                            }
-                          } catch (e) {}
-                        }
-
                         // Count how many other routines cover this day
                         const overlappingRoutines = allRoutines.filter(r => {
                           if (r.id === editingRoutineId) return false;
+                          
+                          if (r.specific_dates && r.specific_dates.length > 0) {
+                            return r.specific_dates.includes(dateStr);
+                          }
+                          
                           try {
                             const start = startOfDay(new Date(r.date));
                             const end = r.end_date ? startOfDay(new Date(r.end_date)) : start;
@@ -1295,16 +1287,21 @@ const RoutinePage = ({
                         return (
                           <div
                             key={`inline-cal-${i}`}
+                            onClick={() => {
+                              setSelectedDates(prev => 
+                                prev.includes(dateStr) 
+                                  ? prev.filter(d => d !== dateStr) 
+                                  : [...prev, dateStr]
+                              );
+                            }}
                             className={cn(
-                              "aspect-square flex items-center justify-center text-[10px] font-bold rounded-lg transition-all relative",
+                              "aspect-square flex items-center justify-center text-[10px] font-bold rounded-lg transition-all relative cursor-pointer",
                               !isCurrentMonth && "opacity-20",
-                              isStart || isEnd 
+                              isSelected 
                                 ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 z-10" 
-                                : isInRange 
-                                  ? "bg-indigo-500/20 text-indigo-500" 
-                                  : overlappingRoutines.length > 0
-                                    ? darkMode ? "bg-white/10 text-indigo-300" : "bg-indigo-50 text-indigo-400"
-                                    : darkMode ? "text-slate-400 hover:bg-white/5" : "text-slate-600 hover:bg-slate-200"
+                                : overlappingRoutines.length > 0
+                                  ? darkMode ? "bg-white/10 text-indigo-300" : "bg-indigo-50 text-indigo-400"
+                                  : darkMode ? "text-slate-400 hover:bg-white/5" : "text-slate-600 hover:bg-slate-200"
                             )}
                           >
                             {format(day, 'd')}
@@ -1315,12 +1312,12 @@ const RoutinePage = ({
                                     key={idx} 
                                     className={cn(
                                       "w-1 h-1 rounded-full",
-                                      isStart || isEnd ? "bg-white/60" : "bg-indigo-400/60"
+                                      isSelected ? "bg-white/60" : "bg-indigo-400/60"
                                     )} 
                                   />
                                 ))}
                                 {overlappingRoutines.length > 3 && (
-                                  <div className={cn("w-0.5 h-0.5 rounded-full", isStart || isEnd ? "bg-white/30" : "bg-indigo-400/30")} />
+                                  <div className={cn("w-0.5 h-0.5 rounded-full", isSelected ? "bg-white/30" : "bg-indigo-400/30")} />
                                 )}
                               </div>
                             )}
@@ -2639,31 +2636,16 @@ export default function App() {
   const daysWithSessions = useMemo(() => {
     const set = new Set<string>();
     
-    // Add dates from sessions
+    // ONLY add dates from COMPLETED sessions
     sessions.forEach(s => {
-      const dateStr = s.date.includes('T') ? format(new Date(s.date), 'yyyy-MM-dd') : s.date;
-      set.add(dateStr);
-    });
-
-    // Add dates from routines (start_date to end_date range)
-    routines.forEach(r => {
-      if (r.deleted_at) return;
-      
-      const start = new Date(r.date.includes('T') ? r.date : r.date + 'T00:00:00');
-      const end = r.end_date 
-        ? new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T00:00:00')
-        : start;
-
-      // Iterate through all days in range
-      let current = new Date(start);
-      while (current <= end) {
-        set.add(format(current, 'yyyy-MM-dd'));
-        current = addDays(current, 1);
+      if (s.completed) {
+        const dateStr = s.date.includes('T') ? format(new Date(s.date), 'yyyy-MM-dd') : s.date;
+        set.add(dateStr);
       }
     });
 
     return set;
-  }, [sessions, routines]);
+  }, [sessions]);
 
   if (isAuthLoading) {
     return (
@@ -3109,20 +3091,24 @@ export default function App() {
                       await refreshData(user.id);
                     }
                   }}
-                  onAddTask={async (routineId, subject, chapter, topics, date, end_date, reminder_time) => {
+                  onAddTask={async (routineId, subject, chapter, topics, date, end_date, reminder_time, specific_dates) => {
                     if (user) {
                       try {
-                        const start = startOfDay(new Date(date));
-                        const end = end_date ? startOfDay(new Date(end_date)) : start;
-                        const diff = differenceInDays(end, start);
-                        const daysCount = diff >= 0 ? diff + 1 : 1;
+                        let datesToProcess: string[] = [];
+                        if (specific_dates && specific_dates.length > 0) {
+                          datesToProcess = specific_dates;
+                        } else {
+                          const start = startOfDay(new Date(date));
+                          const end = end_date ? startOfDay(new Date(end_date)) : start;
+                          const diff = differenceInDays(end, start);
+                          const daysCount = diff >= 0 ? diff + 1 : 1;
+                          for (let i = 0; i < daysCount; i++) {
+                            datesToProcess.push(format(addDays(start, i), 'yyyy-MM-dd'));
+                          }
+                        }
                         
                         const sessionsToSave: StudySession[] = [];
-                        
-                        for (let i = 0; i < daysCount; i++) {
-                          const currentDate = addDays(start, i);
-                          const dateStr = format(currentDate, 'yyyy-MM-dd');
-                          
+                        for (const dateStr of datesToProcess) {
                           const sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
                             ? crypto.randomUUID() 
                             : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -3197,6 +3183,12 @@ export default function App() {
                       const dateStr = format(day, 'yyyy-MM-dd');
                       const dayRoutines = routines.filter(r => {
                         if (r.deleted_at) return false;
+                        
+                        // Check specific dates first
+                        if (r.specific_dates && r.specific_dates.length > 0) {
+                          return r.specific_dates.includes(dateStr);
+                        }
+                        
                         const rStart = r.date.includes('T') ? format(new Date(r.date), 'yyyy-MM-dd') : r.date;
                         if (!r.end_date) return rStart === dateStr;
                         const rEnd = r.end_date.includes('T') ? format(new Date(r.end_date), 'yyyy-MM-dd') : r.end_date;
@@ -4345,9 +4337,9 @@ function FullCalendarContent({
                     "relative aspect-square flex flex-col items-center justify-center transition-all",
                     !isCurrentMonth && "opacity-20",
                     isSel 
-                      ? "bg-danger text-white rounded-full shadow-lg shadow-danger/20 scale-105" 
+                      ? "bg-primary text-white rounded-2xl shadow-lg shadow-primary/20 scale-105" 
                       : hasSess 
-                        ? "bg-danger/10 text-danger rounded-full" 
+                        ? "bg-primary/10 text-primary rounded-2xl" 
                         : "rounded-xl md:rounded-2xl hover:bg-white/5 text-gray-300",
                     isTod && !isSel && "border border-primary/50",
                     isTod && !isSel && !hasSess && "text-primary rounded-xl md:rounded-2xl"
@@ -4355,17 +4347,9 @@ function FullCalendarContent({
                 >
                   <span className="text-base md:text-lg font-bold z-10">{format(day, 'd')}</span>
                   
-                  {/* Visual indicators for routine start/end */}
-                  {!isSel && (isRoutineStart || isRoutineEnd) && (
-                    <div className={cn(
-                      "absolute inset-0 rounded-full border-2 border-dashed pointer-events-none",
-                      isRoutineStart ? "border-emerald-500/40" : "border-amber-500/40"
-                    )} />
-                  )}
-
-                  {/* Dot indicator for sessions/routines */}
+                  {/* Dot indicator for COMPLETED sessions only */}
                   {hasSess && !isSel && (
-                    <div className="absolute bottom-1.5 w-1 h-1 bg-danger rounded-full" />
+                    <div className="absolute bottom-2 w-1.5 h-1.5 bg-primary rounded-full shadow-[0_0_8px_rgba(79,70,229,0.6)]" />
                   )}
                 </button>
               );

@@ -86,6 +86,7 @@ export interface RoutineItem {
   topics?: string;
   date: string; // YYYY-MM-DD (Start Date)
   end_date?: string | null; // YYYY-MM-DD
+  specific_dates?: string[] | null; // YYYY-MM-DD array
   created_at: string;
   countdown: number;
   deleted_at?: string | null; // ISO string
@@ -953,7 +954,22 @@ export const storage = {
         } else if (change.type === 'permanent_delete_routine') {
           ({ error } = await supabase.from('routines').delete().eq('id', change.id).eq('user_id', userId));
         } else if (change.type === 'save_routine') {
-          ({ error } = await supabase.from('routines').upsert({ ...change.data, user_id: userId }));
+          const routineData = change.data;
+          let { error: routineError } = await supabase.from('routines').upsert({ ...routineData, user_id: userId });
+          
+          // Fallback for missing column
+          if (routineError && routineError.message?.includes("Could not find the 'specific_dates' column")) {
+            const fallbackData = {
+              ...routineData,
+              topics: `__JSON_FALLBACK__:${JSON.stringify({
+                topics: routineData.topics,
+                specific_dates: routineData.specific_dates
+              })}`,
+              specific_dates: undefined
+            };
+            ({ error: routineError } = await supabase.from('routines').upsert({ ...fallbackData, user_id: userId }));
+          }
+          error = routineError;
         } else if (change.type === 'delete_routine') {
           ({ error } = await supabase.from('routines').update({ deleted_at: change.deleted_at }).eq('id', change.id).eq('user_id', userId));
         } else if (change.type === 'restore_routine') {
@@ -1104,7 +1120,19 @@ export const storage = {
       }
       if (localRoutines.length > 0) {
         const allRoutines = localRoutines.map((r: any) => ({ ...r, user_id: userId }));
-        await supabase.from('routines').upsert(allRoutines);
+        const { error: routineError } = await supabase.from('routines').upsert(allRoutines);
+        
+        if (routineError && routineError.message?.includes("Could not find the 'specific_dates' column")) {
+          const fallbackRoutines = allRoutines.map((r: any) => ({
+            ...r,
+            topics: `__JSON_FALLBACK__:${JSON.stringify({
+              topics: r.topics,
+              specific_dates: r.specific_dates
+            })}`,
+            specific_dates: undefined
+          }));
+          await supabase.from('routines').upsert(fallbackRoutines);
+        }
       }
       if (localSettings) {
         await supabase.from('settings').upsert({ user_id: userId, type: 'app', settings: localSettings }, { onConflict: 'user_id,type' });
@@ -1136,7 +1164,28 @@ export const storage = {
       
       if (error) throw error;
       
-      const routines = data as RoutineItem[];
+      const routines = (data || []).map(r => {
+        let specific_dates = r.specific_dates;
+        let topics = r.topics;
+
+        // Check if topics contains the JSON fallback for missing column
+        if (topics && typeof topics === 'string' && topics.startsWith('__JSON_FALLBACK__:')) {
+          try {
+            const fallback = JSON.parse(topics.replace('__JSON_FALLBACK__:', ''));
+            topics = fallback.topics;
+            specific_dates = fallback.specific_dates;
+          } catch (e) {
+            console.error('Error parsing routine fallback:', e);
+          }
+        }
+
+        return {
+          ...r,
+          topics,
+          specific_dates
+        } as RoutineItem;
+      });
+
       // Cache routines locally
       localStorage.setItem(`cached_routines_${userId}`, JSON.stringify(routines));
       return routines;
@@ -1164,6 +1213,7 @@ export const storage = {
       topics: routine.topics ?? existing?.topics ?? '',
       date: routine.date ?? existing?.date ?? format(new Date(), 'yyyy-MM-dd'),
       end_date: routine.end_date !== undefined ? routine.end_date : (existing?.end_date ?? null),
+      specific_dates: routine.specific_dates !== undefined ? routine.specific_dates : (existing?.specific_dates ?? null),
       reminder_time: routine.reminder_time !== undefined ? routine.reminder_time : (existing?.reminder_time ?? null),
       created_at: routine.created_at ?? existing?.created_at ?? new Date().toISOString(),
       countdown: routine.countdown ?? existing?.countdown ?? 0,
@@ -1194,7 +1244,28 @@ export const storage = {
         .from('routines')
         .upsert(fullRoutine);
       
-      if (error) throw error;
+      if (error) {
+        // Handle missing column error by using a fallback in the topics field
+        if (error.message?.includes("Could not find the 'specific_dates' column")) {
+          console.warn('[Storage] specific_dates column missing in Supabase. Using fallback in topics field.');
+          const fallbackRoutine = {
+            ...fullRoutine,
+            topics: `__JSON_FALLBACK__:${JSON.stringify({
+              topics: fullRoutine.topics,
+              specific_dates: fullRoutine.specific_dates
+            })}`,
+            specific_dates: undefined // Remove the problematic field
+          };
+          
+          const { error: fallbackError } = await supabase
+            .from('routines')
+            .upsert(fallbackRoutine);
+          
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
 
       // Remove from pending if successful
       const updatedPending = JSON.parse(localStorage.getItem(pendingKey) || '[]').filter((p: any) => (p.id || p.data?.id) !== routineId);
