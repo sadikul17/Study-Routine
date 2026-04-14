@@ -5129,17 +5129,25 @@ const SessionForm = ({ onSubmit, darkMode, initialData }: { onSubmit: (data: any
         </div>
 
         <div className="flex gap-3 items-center mt-2">
-          <div className="relative flex-shrink-0 w-32">
+          <div className="relative flex-shrink-0 w-32 group">
             <input 
               type="time"
               value={reminderTime}
               onChange={e => setReminderTime(e.target.value)}
               placeholder="set a time"
               className={cn(
-                "w-full p-4 rounded-input outline-none border transition-colors text-center",
+                "w-full p-4 rounded-input outline-none border transition-colors text-center pr-8",
                 darkMode ? "bg-input border-white/5 focus:border-primary/50 text-white" : "bg-gray-50 border-gray-200 focus:border-primary/50 text-gray-900"
               )}
             />
+            {reminderTime && (
+              <button 
+                onClick={() => setReminderTime('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-rose-500 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
 
           <button 
@@ -5152,7 +5160,7 @@ const SessionForm = ({ onSubmit, darkMode, initialData }: { onSubmit: (data: any
                 topics, 
                 color: selectedColor, 
                 icon: selectedIcon,
-                reminder_time: reminderTime || undefined
+                reminder_time: reminderTime || null
               });
               if (!initialData) {
                 setSubject('');

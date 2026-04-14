@@ -39,7 +39,7 @@ export interface StudySession {
   date: string; // ISO string or YYYY-MM-DD
   completed: boolean;
   deleted_at?: string; // ISO string
-  reminder_time?: string; // HH:mm
+  reminder_time?: string | null; // HH:mm
   routine_id?: string;
 }
 
