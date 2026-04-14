@@ -8,16 +8,16 @@
   "theme_color": "#0A0E14",
   "icons": [
     {
-      "src": "https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y",
+      "src": "https://cdn-icons-png.flaticon.com/512/831/831386.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y",
+      "src": "https://cdn-icons-png.flaticon.com/512/831/831386.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

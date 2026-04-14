@@ -62,7 +62,7 @@ export const notificationService = {
     // Common notification properties for professional look
     const commonProps = {
       smallIcon: 'ic_launcher', // Standard native icon reference
-      largeIcon: 'https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y', // App logo
+      largeIcon: 'https://cdn-icons-png.flaticon.com/512/831/831386.png', // App logo
       iconColor: '#000000', // Black color to match the provided icon
       channelId: 'study_reminders',
       sound: settings.sound ? 'default' : undefined,
@@ -273,7 +273,7 @@ export const notificationService = {
           schedule: { at: scheduleDate, allowWhileIdle: true },
           sound: 'default',
           smallIcon: 'ic_launcher',
-          largeIcon: 'https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y',
+          largeIcon: 'https://cdn-icons-png.flaticon.com/512/831/831386.png',
           iconColor: '#000000',
           extra: { type: 'alarm' }
         }]
@@ -298,7 +298,7 @@ export const notificationService = {
           schedule: { at: new Date(Date.now() + 1000), allowWhileIdle: true },
           sound: 'default',
           smallIcon: 'ic_launcher',
-          largeIcon: 'https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y',
+          largeIcon: 'https://cdn-icons-png.flaticon.com/512/831/831386.png',
           iconColor: '#000000',
           extra: { type: 'prayer_time' }
         }]
