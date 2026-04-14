@@ -62,7 +62,7 @@ export const notificationService = {
     // Common notification properties for professional look
     const commonProps = {
       smallIcon: 'ic_launcher', // Standard native icon reference
-      largeIcon: 'https://img.icons8.com/ios-filled/512/graduation-cap.png', // Clean graduation cap icon
+      largeIcon: 'https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y', // App logo
       iconColor: '#000000', // Black color to match the provided icon
       channelId: 'study_reminders',
       sound: settings.sound ? 'default' : undefined,
@@ -121,8 +121,9 @@ export const notificationService = {
 
     // 3. Specific Task Reminders
     sessions.filter(s => !s.completed && s.reminder_time).forEach(s => {
-      const datePart = s.date.includes('T') ? s.date.split('T')[0] : s.date;
-      const taskDate = new Date(`${datePart}T${s.reminder_time}:00`);
+      const [h, m] = s.reminder_time.split(':').map(Number);
+      const taskDate = new Date(s.date.includes('T') ? s.date : `${s.date}T00:00:00`);
+      taskDate.setHours(h, m, 0, 0);
 
       if (taskDate > now) {
         notifications.push({
@@ -140,8 +141,9 @@ export const notificationService = {
 
     // 4. Specific Routine Reminders
     routines.filter(r => !r.deleted_at && r.reminder_time).forEach(r => {
-      const datePart = r.date.includes('T') ? r.date.split('T')[0] : r.date;
-      const routineDate = new Date(`${datePart}T${r.reminder_time}:00`);
+      const [h, m] = r.reminder_time.split(':').map(Number);
+      const routineDate = new Date(r.date.includes('T') ? r.date : `${r.date}T00:00:00`);
+      routineDate.setHours(h, m, 0, 0);
 
       if (routineDate > now) {
         notifications.push({
@@ -271,7 +273,7 @@ export const notificationService = {
           schedule: { at: scheduleDate, allowWhileIdle: true },
           sound: 'default',
           smallIcon: 'ic_launcher',
-          largeIcon: 'https://img.icons8.com/ios-filled/512/graduation-cap.png',
+          largeIcon: 'https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y',
           iconColor: '#000000',
           extra: { type: 'alarm' }
         }]
@@ -296,7 +298,7 @@ export const notificationService = {
           schedule: { at: new Date(Date.now() + 1000), allowWhileIdle: true },
           sound: 'default',
           smallIcon: 'ic_launcher',
-          largeIcon: 'https://img.icons8.com/ios-filled/512/graduation-cap.png',
+          largeIcon: 'https://files.oaiusercontent.com/file-7U9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y9Y',
           iconColor: '#000000',
           extra: { type: 'prayer_time' }
         }]

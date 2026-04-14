@@ -51,7 +51,8 @@ import {
   Sunset,
   CloudSun,
   Stars,
-  Dumbbell
+  Dumbbell,
+  Search
 } from 'lucide-react';
 import { 
   format, 
@@ -74,6 +75,8 @@ import { bn } from 'date-fns/locale';
 import { 
   AreaChart,
   Area,
+  BarChart,
+  Bar,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -81,7 +84,9 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell
+  Cell,
+  Line,
+  ComposedChart
 } from 'recharts';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -589,6 +594,9 @@ const RoutinePage = ({
   const [printEndDate, setPrintEndDate] = useState('');
   const [view, setView] = useState<'active' | 'ended' | 'deleted'>('active');
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [focusedDate, setFocusedDate] = useState<string | null>(format(new Date(), 'yyyy-MM-dd'));
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
   const calendarDays = useMemo(() => {
@@ -614,6 +622,21 @@ const RoutinePage = ({
   }, [selectedDates]);
 
   const allRoutines = useMemo(() => routines.filter(r => !r.deleted_at), [routines]);
+
+  const routinesForFocusedDate = useMemo(() => {
+    if (!focusedDate) return [];
+    return allRoutines.filter(r => {
+      if (r.specific_dates && r.specific_dates.length > 0) {
+        return r.specific_dates.includes(focusedDate);
+      }
+      try {
+        const start = startOfDay(new Date(r.date));
+        const end = r.end_date ? startOfDay(new Date(r.end_date)) : start;
+        const target = startOfDay(new Date(focusedDate));
+        return target >= start && target <= end;
+      } catch (e) { return false; }
+    });
+  }, [focusedDate, allRoutines]);
 
   const activeRoutines = useMemo(() => routines.filter(r => {
     if (r.deleted_at) return false;
@@ -651,9 +674,16 @@ const RoutinePage = ({
 
   const deletedRoutines = useMemo(() => routines.filter(r => !!r.deleted_at), [routines]);
 
-  const currentRoutines = useMemo(() => 
-    view === 'active' ? activeRoutines : view === 'ended' ? endedRoutines : deletedRoutines
-  , [view, activeRoutines, endedRoutines, deletedRoutines]);
+  const currentRoutines = useMemo(() => {
+    const baseRoutines = view === 'active' ? activeRoutines : view === 'ended' ? endedRoutines : deletedRoutines;
+    if (!searchQuery.trim()) return baseRoutines;
+    
+    const query = searchQuery.toLowerCase();
+    return baseRoutines.filter(r => 
+      r.subject.toLowerCase().includes(query) || 
+      r.chapter.toLowerCase().includes(query)
+    );
+  }, [view, activeRoutines, endedRoutines, deletedRoutines, searchQuery]);
 
   const generatePDF = async () => {
     if (isGeneratingPDF) return;
@@ -728,8 +758,8 @@ const RoutinePage = ({
       let currentChunk: string[] = [];
       let estimatedHeight = 0;
       // A4 is 210x297mm. At 800px width, height is ~1131px.
-      // We use a safe limit of 920px to account for margins and header/footer and prevent cutting.
-      const maxHeight = 920; 
+      // We use a safe limit of 1050px to utilize more of the page while preventing cutting.
+      const maxHeight = 1050; 
 
       allDatesToPrint.forEach(dateStr => {
         const dayRoutines = groupedRoutines[dateStr] || [];
@@ -978,6 +1008,7 @@ const RoutinePage = ({
     setTopics('');
     setReminderTime('');
     setSelectedDates([format(new Date(), 'yyyy-MM-dd')]);
+    setFocusedDate(format(new Date(), 'yyyy-MM-dd'));
     setEditingRoutineId(null);
     setIsAdding(false);
   };
@@ -988,6 +1019,7 @@ const RoutinePage = ({
     setChapter(routine.chapter);
     setTopics(routine.topics || '');
     setSelectedDates(routine.specific_dates || [routine.date]);
+    setFocusedDate(routine.specific_dates?.[0] || routine.date);
     setReminderTime(routine.reminder_time || '');
     setIsAdding(true);
   };
@@ -1007,156 +1039,201 @@ const RoutinePage = ({
           </p>
         </div>
         
-        <div className="flex items-center w-full">
-        <div className={cn(
-          "flex items-center gap-1 p-1.5 rounded-[2rem] shadow-2xl w-full border",
-          darkMode ? "bg-[#111827]/80 border-white/5 shadow-black/40" : "bg-white/80 border-slate-200 shadow-slate-200/50"
-        )}>
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1">
-            <button
-              onClick={() => setView('active')}
-              className={cn(
-                "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0",
-                view === 'active' 
-                  ? "bg-transparent text-indigo-500 scale-105" 
-                  : "text-slate-500 hover:text-indigo-500"
-              )}
-            >
-              ACTIVE
-            </button>
-            <button
-              onClick={() => setView('ended')}
-              className={cn(
-                "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0",
-                view === 'ended' 
-                  ? "bg-transparent text-indigo-500 scale-105" 
-                  : "text-slate-500 hover:text-indigo-500"
-              )}
-            >
-              ENDED
-            </button>
+        <div className="flex flex-col gap-4 w-full">
+          <div className="flex items-center w-full">
+            <div className={cn(
+              "flex items-center gap-1 p-1.5 rounded-[2rem] shadow-2xl w-full border",
+              darkMode ? "bg-[#111827]/80 border-white/5 shadow-black/40" : "bg-white/80 border-slate-200 shadow-slate-200/50"
+            )}>
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1">
+                <button
+                  onClick={() => setView('active')}
+                  className={cn(
+                    "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0",
+                    view === 'active' 
+                      ? "bg-transparent text-indigo-500 scale-105" 
+                      : "text-slate-500 hover:text-indigo-500"
+                  )}
+                >
+                  ACTIVE
+                </button>
+                <button
+                  onClick={() => setView('ended')}
+                  className={cn(
+                    "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0",
+                    view === 'ended' 
+                      ? "bg-transparent text-indigo-500 scale-105" 
+                      : "text-slate-500 hover:text-indigo-500"
+                  )}
+                >
+                  ENDED
+                </button>
 
-            <button
-              onClick={() => setView('deleted')}
-              className={cn(
-                "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0 flex items-center justify-center",
-                view === 'deleted' 
-                  ? "bg-transparent text-indigo-500 scale-105" 
-                  : "text-slate-500 hover:text-indigo-500"
-              )}
-              title="Trash"
-            >
-              <Trash2 size={18} />
-            </button>
-          </div>
+                <button
+                  onClick={() => setView('deleted')}
+                  className={cn(
+                    "px-4 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all shrink-0 flex items-center justify-center",
+                    view === 'deleted' 
+                      ? "bg-transparent text-indigo-500 scale-105" 
+                      : "text-slate-500 hover:text-indigo-500"
+                  )}
+                  title="Trash"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
 
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={onOpenPrayerTimes}
-              className={cn(
-                "px-3 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all flex items-center justify-center",
-                darkMode ? "text-slate-400 hover:text-indigo-400" : "text-slate-500 hover:text-indigo-500"
-              )}
-              title="Prayer Times"
-            >
-              <Clock size={18} />
-            </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowPrintOptions(!showPrintOptions)}
-                className={cn(
-                  "px-3 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all flex items-center justify-center",
-                  darkMode ? "text-slate-400 hover:text-indigo-400" : "text-slate-500 hover:text-indigo-500"
-                )}
-                title="Download Routine"
-              >
-                <Download size={18} />
-              </button>
-              
-              <AnimatePresence>
-                {showPrintOptions && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => {
+                    setIsSearchVisible(!isSearchVisible);
+                    if (isSearchVisible) setSearchQuery('');
+                  }}
+                  className={cn(
+                    "px-3 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all flex items-center justify-center",
+                    darkMode ? "text-slate-400 hover:text-indigo-400" : "text-slate-500 hover:text-indigo-500",
+                    isSearchVisible && "text-indigo-500"
+                  )}
+                  title="Search Routines"
+                >
+                  {isSearchVisible ? <X size={18} /> : <Search size={18} />}
+                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowPrintOptions(!showPrintOptions)}
                     className={cn(
-                      "absolute right-0 top-full mt-4 z-50 w-56 p-5 rounded-[2rem] border shadow-2xl backdrop-blur-2xl",
-                      darkMode ? "bg-[#111827]/95 border-white/10" : "bg-white/95 border-slate-200"
+                      "px-3 py-2.5 rounded-2xl text-[10px] sm:text-xs font-black transition-all flex items-center justify-center",
+                      darkMode ? "text-slate-400 hover:text-indigo-400" : "text-slate-500 hover:text-indigo-500"
                     )}
+                    title="Download Routine"
                   >
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-indigo-500">
-                        <Printer size={16} />
-                        <span className="font-black text-[10px] uppercase tracking-[0.15em]">Export PDF</span>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">Days</label>
-                        <input 
-                          type="number"
-                          value={printDays}
-                          onChange={(e) => setPrintDays(e.target.value)}
-                          className={cn(
-                            "w-full px-3 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-xs font-black",
-                            darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                          )}
-                          min="1"
-                        />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">Start</label>
-                          <input 
-                            type="date"
-                            value={printStartDate}
-                            onChange={(e) => setPrintStartDate(e.target.value)}
-                            className={cn(
-                              "w-full px-2 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-[10px] font-black",
-                              darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                            )}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">End</label>
-                          <input 
-                            type="date"
-                            value={printEndDate}
-                            onChange={(e) => setPrintEndDate(e.target.value)}
-                            className={cn(
-                              "w-full px-2 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-[10px] font-black",
-                              darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
-                            )}
-                          />
-                        </div>
-                      </div>
-                      <button
-                        onClick={generatePDF}
-                        disabled={isGeneratingPDF}
-                        className="w-full py-3 rounded-xl bg-indigo-500 text-white text-[10px] font-black hover:bg-indigo-600 transition-all shadow-xl shadow-indigo-500/30 disabled:opacity-50 active:scale-95"
+                    <Download size={18} />
+                  </button>
+                  
+                  <AnimatePresence>
+                    {showPrintOptions && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                        className={cn(
+                          "absolute right-0 top-full mt-4 z-50 w-56 p-5 rounded-[2rem] border shadow-2xl backdrop-blur-2xl",
+                          darkMode ? "bg-[#111827]/95 border-white/10" : "bg-white/95 border-slate-200"
+                        )}
                       >
-                        {isGeneratingPDF ? "GENERATING..." : "DOWNLOAD PDF"}
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2 text-indigo-500">
+                            <Printer size={16} />
+                            <span className="font-black text-[10px] uppercase tracking-[0.15em]">Export PDF</span>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">Days</label>
+                            <input 
+                              type="number"
+                              value={printDays}
+                              onChange={(e) => setPrintDays(e.target.value)}
+                              className={cn(
+                                "w-full px-3 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-xs font-black",
+                                darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                              )}
+                              min="1"
+                            />
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">Start</label>
+                              <input 
+                                type="date"
+                                value={printStartDate}
+                                onChange={(e) => setPrintStartDate(e.target.value)}
+                                className={cn(
+                                  "w-full px-2 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-[10px] font-black",
+                                  darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                                )}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40 ml-1">End</label>
+                              <input 
+                                type="date"
+                                value={printEndDate}
+                                onChange={(e) => setPrintEndDate(e.target.value)}
+                                className={cn(
+                                  "w-full px-2 py-2 rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-[10px] font-black",
+                                  darkMode ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                                )}
+                              />
+                            </div>
+                          </div>
+                          <button
+                            onClick={generatePDF}
+                            disabled={isGeneratingPDF}
+                            className="w-full py-3 rounded-xl bg-indigo-500 text-white text-[10px] font-black hover:bg-indigo-600 transition-all shadow-xl shadow-indigo-500/30 disabled:opacity-50 active:scale-95"
+                          >
+                            {isGeneratingPDF ? "GENERATING..." : "DOWNLOAD PDF"}
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
-            <button
-              onClick={() => {
-                setView('active');
-                setIsAdding(!isAdding);
-              }}
-              className={cn(
-                "px-3 py-2.5 rounded-2xl transition-all active:scale-95 flex items-center justify-center shrink-0",
-                darkMode ? "text-indigo-400 hover:bg-indigo-500/10" : "text-indigo-600 hover:bg-indigo-50"
-              )}
-              title="Add New Routine"
-            >
-              {isAdding ? <X size={20} strokeWidth={3} /> : <Plus size={20} strokeWidth={3} />}
-            </button>
+                <button
+                  onClick={() => {
+                    setView('active');
+                    setIsAdding(!isAdding);
+                  }}
+                  className={cn(
+                    "px-3 py-2.5 rounded-2xl transition-all active:scale-95 flex items-center justify-center shrink-0",
+                    darkMode ? "text-indigo-400 hover:bg-indigo-500/10" : "text-indigo-600 hover:bg-indigo-50"
+                  )}
+                  title="Add New Routine"
+                >
+                  {isAdding ? <X size={20} strokeWidth={3} /> : <Plus size={20} strokeWidth={3} />}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+
+          <AnimatePresence>
+            {isSearchVisible && (
+              <motion.div
+                initial={{ height: 0, opacity: 0, y: -10 }}
+                animate={{ height: 'auto', opacity: 1, y: 0 }}
+                exit={{ height: 0, opacity: 0, y: -10 }}
+                className="overflow-hidden"
+              >
+                <div className={cn(
+                  "p-3 rounded-[2rem] border shadow-2xl",
+                  darkMode ? "bg-[#111827]/80 border-white/5 shadow-black/40" : "bg-white/80 border-slate-200 shadow-slate-200/50"
+                )}>
+                  <div className="relative flex items-center">
+                    <Search className="absolute left-4 text-indigo-500" size={18} />
+                    <input
+                      type="text"
+                      placeholder="Search by subject or chapter..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className={cn(
+                        "w-full pl-12 pr-10 py-3 rounded-2xl text-xs font-black outline-none transition-all",
+                        darkMode ? "bg-white/5 text-white placeholder:text-slate-500" : "bg-slate-50 text-slate-900 placeholder:text-slate-400"
+                      )}
+                      autoFocus
+                    />
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-4 text-slate-400 hover:text-indigo-500 transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </header>
 
@@ -1267,6 +1344,7 @@ const RoutinePage = ({
                       {calendarDays.map((day, i) => {
                         const dateStr = format(day, 'yyyy-MM-dd');
                         const isSelected = selectedDates.includes(dateStr);
+                        const isFocused = focusedDate === dateStr;
                         const isCurrentMonth = isSameMonth(day, calendarMonth);
                         
                         // Count how many other routines cover this day
@@ -1288,6 +1366,7 @@ const RoutinePage = ({
                           <div
                             key={`inline-cal-${i}`}
                             onClick={() => {
+                              setFocusedDate(dateStr);
                               setSelectedDates(prev => 
                                 prev.includes(dateStr) 
                                   ? prev.filter(d => d !== dateStr) 
@@ -1301,7 +1380,8 @@ const RoutinePage = ({
                                 ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 z-10" 
                                 : overlappingRoutines.length > 0
                                   ? darkMode ? "bg-white/10 text-indigo-300" : "bg-indigo-50 text-indigo-400"
-                                  : darkMode ? "text-slate-400 hover:bg-white/5" : "text-slate-600 hover:bg-slate-200"
+                                  : darkMode ? "text-slate-400 hover:bg-white/5" : "text-slate-600 hover:bg-slate-200",
+                              isFocused && !isSelected && (darkMode ? "ring-2 ring-indigo-500/50" : "ring-2 ring-indigo-500/30")
                             )}
                           >
                             {format(day, 'd')}
@@ -1326,6 +1406,59 @@ const RoutinePage = ({
                       })}
                     </div>
                   </div>
+
+                  {/* Focused Date Details */}
+                  {focusedDate && (
+                    <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-indigo-500">
+                          {format(new Date(focusedDate), 'MMM d, yyyy')} Schedule
+                        </span>
+                        <span className="text-[9px] font-bold text-slate-400">
+                          {routinesForFocusedDate.length} {routinesForFocusedDate.length === 1 ? 'Routine' : 'Routines'}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1 pb-2 custom-scrollbar">
+                        {routinesForFocusedDate.length > 0 ? (
+                          routinesForFocusedDate.map((r, idx) => (
+                            <div 
+                              key={r.id + idx}
+                              className={cn(
+                                "flex items-center gap-3 p-2.5 rounded-xl border transition-all",
+                                darkMode ? "bg-slate-800/80 border-slate-700/50" : "bg-white border-slate-100 shadow-sm"
+                              )}
+                            >
+                              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-500 shrink-0">
+                                <Book size={14} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className={cn("text-[11px] font-black truncate", darkMode ? "text-slate-200" : "text-slate-700")}>
+                                  {r.subject}
+                                </p>
+                                <p className="text-[9px] font-bold text-slate-500 truncate opacity-70">
+                                  {r.chapter}
+                                </p>
+                              </div>
+                              {r.reminder_time && (
+                                <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-slate-500/5 text-slate-400 shrink-0">
+                                  <Clock size={10} />
+                                  <span className="text-[8px] font-black">{r.reminder_time}</span>
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <div className={cn(
+                            "py-4 text-center rounded-xl border border-dashed",
+                            darkMode ? "border-slate-700 text-slate-500" : "border-slate-200 text-slate-400"
+                          )}>
+                            <p className="text-[10px] font-bold italic">No routines scheduled for this day</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             </div>
@@ -1682,6 +1815,19 @@ const Badge = ({ count, color }: { count: number; color: string }) => (
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'overview' | 'settings' | 'routine'>('home');
   
+  const tabs: ('home' | 'routine' | 'overview' | 'settings')[] = ['home', 'routine', 'overview', 'settings'];
+  
+  const handleSwipe = (direction: 'left' | 'right') => {
+    const currentIndex = tabs.indexOf(activeTab);
+    if (direction === 'right') {
+      const nextIndex = (currentIndex + 1) % tabs.length;
+      setActiveTab(tabs[nextIndex]);
+    } else {
+      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      setActiveTab(tabs[prevIndex]);
+    }
+  };
+
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [routines, setRoutines] = useState<RoutineItem[]>([]);
   const [trash, setTrash] = useState<StudySession[]>([]);
@@ -1765,6 +1911,14 @@ export default function App() {
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(25 * 60);
 
   const [profile, setProfile] = useState<UserProfile>({ name: 'Student', grade: 'Grade 10', school: 'Your School', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' });
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
   
   const [profileForm, setProfileForm] = useState<UserProfile>(profile);
 
@@ -2727,8 +2881,19 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 md:ml-64 relative h-full overflow-y-auto overflow-x-hidden w-full scrollbar-hide border-none scroll-smooth touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
-        <div className="max-w-5xl mx-auto w-full pb-32 md:pb-8">
-          <AnimatePresence mode="wait">
+        <motion.div 
+          onPanEnd={(_, info) => {
+            const swipeThreshold = 50;
+            const velocityThreshold = 0.2;
+            if (Math.abs(info.offset.x) > swipeThreshold && Math.abs(info.offset.x) > Math.abs(info.offset.y)) {
+              if (info.offset.x > 0) handleSwipe('left');
+              else handleSwipe('right');
+            }
+          }}
+          className="min-h-full w-full"
+        >
+          <div className="max-w-5xl mx-auto w-full pb-32 md:pb-8">
+            <AnimatePresence mode="wait">
             {activeTab === 'home' && (
               <motion.div 
                 key="home"
@@ -2741,76 +2906,17 @@ export default function App() {
               >
                   <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl py-6 flex justify-between items-center transition-all">
                     <div className="space-y-1">
-                      <h1 className="text-4xl md:text-6xl font-black tracking-tight text-foreground">Diary</h1>
-                      <div className="flex items-center gap-2 text-gray-400 font-bold text-sm md:text-lg">
-                        <Calendar size={18} className="text-primary" />
-                        {format(selectedDate, 'MMMM d, yyyy')}
+                      <div className="flex flex-col">
+                        <h1 className="text-5xl md:text-7xl font-black tracking-tighter text-primary drop-shadow-[0_0_15px_rgba(88,86,214,0.3)]">
+                          {format(currentTime, 'hh:mm')}
+                          <span className="text-xl md:text-2xl ml-3 opacity-40 font-bold tracking-widest">{format(currentTime, 'a')}</span>
+                        </h1>
+                        <p className="text-xs md:text-sm font-black text-gray-400 uppercase tracking-[0.4em] mt-2 opacity-60">
+                          {format(currentTime, 'MMMM d, yyyy')}
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <button 
-                        onClick={() => setIsScheduleModalOpen(true)}
-                        className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
-                        title="Daily Schedule"
-                      >
-                        <Clock size={24} />
-                      </button>
-                      <div className="relative">
-                        <button 
-                          onClick={() => setShowHomePrintOptions(!showHomePrintOptions)}
-                          className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
-                        >
-                          <Download size={24} />
-                        </button>
-
-                        <AnimatePresence>
-                          {showHomePrintOptions && (
-                            <motion.div
-                              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                              animate={{ opacity: 1, scale: 1, y: 0 }}
-                              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                              className={cn(
-                                "absolute right-0 top-16 z-50 w-48 p-4 rounded-xl border shadow-xl",
-                                settings.dark_mode ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
-                              )}
-                            >
-                              <div className="space-y-4">
-                                <div className="flex items-center gap-2 text-indigo-500">
-                                  <Download size={16} />
-                                  <span className="text-xs font-bold uppercase tracking-wider">Download Diary</span>
-                                </div>
-                                
-                                <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Number of Days</label>
-                                  <input 
-                                    type="number"
-                                    value={homePrintDays}
-                                    onChange={(e) => setHomePrintDays(e.target.value)}
-                                    className={cn(
-                                      "w-full px-3 py-2 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500",
-                                      settings.dark_mode ? "bg-slate-900 text-white border-slate-700" : "bg-slate-100 text-slate-900 border-slate-200"
-                                    )}
-                                    placeholder="e.g. 7"
-                                  />
-                                </div>
-
-                                <button
-                                  onClick={generateHomePDF}
-                                  disabled={isGeneratingHomePDF}
-                                  className="w-full bg-indigo-500 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition-colors flex items-center justify-center gap-2"
-                                >
-                                  {isGeneratingHomePDF ? (
-                                    <RefreshCw size={16} className="animate-spin" />
-                                  ) : (
-                                    <Check size={16} />
-                                  )}
-                                  {isGeneratingHomePDF ? 'Generating...' : 'Done'}
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
                       <button 
                         onClick={() => setIsFullCalendarOpen(true)}
                         className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
@@ -2906,68 +3012,10 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Centered Timer Slot (Absolute) */}
-                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-30">
-                          {!isTimerExpanded && pendingSessions.length > 0 && (
-                            <div className="pointer-events-auto">
-                              <Timer 
-                                layoutId="timer-component"
-                                isExpanded={false}
-                                onToggleExpand={() => setIsTimerExpanded(true)}
-                                initialMinutes={timerInitialMinutes} 
-                                onSetInitialMinutes={setTimerInitialMinutes}
-                                taskName={pendingSessions[0].subject}
-                                onComplete={() => {
-                                  if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-                                  toggleComplete(pendingSessions[0].id);
-                                }}
-                                timeLeft={timerTimeLeft}
-                                setTimeLeft={setTimerTimeLeft}
-                                isActive={isTimerActive}
-                                setIsActive={setIsTimerActive}
-                                totalSeconds={timerTotalSeconds}
-                                setTotalSeconds={setTimerTotalSeconds}
-                                darkMode={settings.dark_mode}
-                              />
-                            </div>
-                          )}
-                        </div>
+                        {/* Centered Timer Slot (Absolute) - REMOVED */}
                       </div>
 
-                      {/* Expanded Timer Slot: Below Header */}
-                      <AnimatePresence mode="popLayout">
-                        {isTimerExpanded && pendingSessions.length > 0 && (
-                          <motion.div 
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-                            className="overflow-hidden flex justify-center"
-                          >
-                            <div className="pb-4">
-                              <Timer 
-                                layoutId="timer-component"
-                                isExpanded={true}
-                                onToggleExpand={() => setIsTimerExpanded(false)}
-                                initialMinutes={timerInitialMinutes} 
-                                onSetInitialMinutes={setTimerInitialMinutes}
-                                taskName={pendingSessions[0].subject}
-                                onComplete={() => {
-                                  if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-                                  toggleComplete(pendingSessions[0].id);
-                                }}
-                                timeLeft={timerTimeLeft}
-                                setTimeLeft={setTimerTimeLeft}
-                                isActive={isTimerActive}
-                                setIsActive={setIsTimerActive}
-                                totalSeconds={timerTotalSeconds}
-                                setTotalSeconds={setTimerTotalSeconds}
-                                darkMode={settings.dark_mode}
-                              />
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                      {/* Expanded Timer Slot: Below Header - REMOVED */}
 
                       {/* Task List */}
                       <Reorder.Group 
@@ -3001,6 +3049,7 @@ export default function App() {
                                 }}
                                 onClick={() => setExpandedTaskId(expandedTaskId === s.id ? null : s.id)}
                                 isExpanded={expandedTaskId === s.id || (expandedTaskId === null && index === 0)}
+                                darkMode={settings.dark_mode}
                               />
                             ))
                           )}
@@ -3046,7 +3095,8 @@ export default function App() {
                               }}
                               onClick={() => setExpandedTaskId(expandedTaskId === s.id ? null : s.id)}
                               isExpanded={expandedTaskId === s.id}
-                            />
+                                darkMode={settings.dark_mode}
+                              />
                           ))
                         )}
                       </AnimatePresence>
@@ -3245,18 +3295,34 @@ export default function App() {
                           <p className="text-xs text-gray-500 font-bold">Daily session distribution</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Weekly Total</p>
-                        <p className="text-2xl font-black text-foreground">{last7DaysSessions.length}</p>
+                      <div className="flex items-center gap-6">
+                        <div className="hidden sm:flex items-center gap-4 mr-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-primary" />
+                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Completed</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-rose-500" />
+                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Incomplete</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Weekly Total</p>
+                          <p className="text-2xl font-black text-foreground">{last7DaysSessions.length}</p>
+                        </div>
                       </div>
                     </div>
                     <div className="h-72 w-full relative">
                       <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <AreaChart data={generateChartData(sessions)}>
+                        <ComposedChart data={generateChartData(sessions)}>
                           <defs>
-                            <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#5856D6" stopOpacity={0.3}/>
                               <stop offset="95%" stopColor="#5856D6" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorIncomplete" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#F43F5E" stopOpacity={0.2}/>
+                              <stop offset="95%" stopColor="#F43F5E" stopOpacity={0}/>
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke={settings.dark_mode ? "#ffffff05" : "#00000005"} vertical={false} />
@@ -3269,6 +3335,7 @@ export default function App() {
                           />
                           <YAxis hide />
                           <Tooltip 
+                            cursor={{ stroke: settings.dark_mode ? '#ffffff10' : '#00000010', strokeWidth: 2 }}
                             content={({ active, payload }) => {
                               if (active && payload && payload.length) {
                                 return (
@@ -3276,13 +3343,28 @@ export default function App() {
                                     "border p-4 rounded-2xl shadow-2xl backdrop-blur-xl",
                                     settings.dark_mode ? "bg-[#161B22]/90 border-white/10" : "bg-white/90 border-gray-200"
                                   )}>
-                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">{payload[0].payload.name}</p>
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-2 h-2 rounded-full bg-primary" />
-                                      <p className={cn(
-                                        "text-xl font-black",
-                                        settings.dark_mode ? "text-white" : "text-gray-900"
-                                      )}>{payload[0].value} <span className="text-xs font-medium text-gray-400">Sessions</span></p>
+                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">{payload[0].payload.name}</p>
+                                    <div className="space-y-3">
+                                      <div className="flex items-center justify-between gap-12">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_8px_rgba(88,86,214,0.5)]" />
+                                          <span className="text-xs font-bold text-gray-400">Completed</span>
+                                        </div>
+                                        <span className="text-sm font-black text-foreground">{payload[0].value}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-12">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />
+                                          <span className="text-xs font-bold text-gray-400">Incomplete</span>
+                                        </div>
+                                        <span className="text-sm font-black text-foreground">{payload[1].value}</span>
+                                      </div>
+                                      <div className="pt-2 border-t border-white/5 mt-2 flex justify-between items-center">
+                                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Efficiency</span>
+                                        <span className="text-xs font-black text-primary">
+                                          {payload[0].payload.total > 0 ? Math.round((payload[0].value / payload[0].payload.total) * 100) : 0}%
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
                                 );
@@ -3292,14 +3374,31 @@ export default function App() {
                           />
                           <Area 
                             type="monotone" 
-                            dataKey="count" 
+                            dataKey="completed" 
                             stroke="#5856D6" 
-                            strokeWidth={4} 
+                            strokeWidth={4}
                             fillOpacity={1} 
-                            fill="url(#colorCount)"
+                            fill="url(#colorCompleted)" 
                             animationDuration={2000}
                           />
-                        </AreaChart>
+                          <Area 
+                            type="monotone" 
+                            dataKey="incomplete" 
+                            stroke="#F43F5E" 
+                            strokeWidth={3}
+                            fillOpacity={1} 
+                            fill="url(#colorIncomplete)" 
+                            animationDuration={2000}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="completed" 
+                            stroke="#5856D6" 
+                            strokeWidth={0}
+                            dot={{ r: 4, fill: '#5856D6', strokeWidth: 2, stroke: settings.dark_mode ? '#161B22' : '#fff' }}
+                            activeDot={{ r: 6, fill: '#5856D6', strokeWidth: 0 }}
+                          />
+                        </ComposedChart>
                       </ResponsiveContainer>
                     </div>
                   </Card>
@@ -3391,7 +3490,6 @@ export default function App() {
                         <p className="text-xs text-gray-500 font-bold">Your latest study sessions</p>
                       </div>
                     </div>
-                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Last 6 Sessions</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {sessions.slice(-6).reverse().map((s, index) => (
@@ -3405,7 +3503,9 @@ export default function App() {
                         </div>
                         <div className="min-w-0">
                           <p className="font-black text-sm truncate text-foreground tracking-tight">{s.subject}</p>
-                          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{format(new Date(s.date), 'MMM d • h:mm a')}</p>
+                          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                            {format(new Date(s.date), 'MMM d')} • {s.reminder_time ? format(new Date(`2000-01-01T${s.reminder_time}`), 'h:mm a') : 'No time'}
+                          </p>
                         </div>
                       </button>
                     ))}
@@ -3463,20 +3563,6 @@ export default function App() {
 
                 <div className="max-w-3xl mx-auto space-y-8">
                   <Card className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
-                          <Languages size={20} />
-                        </div>
-                        <span className="font-bold text-foreground">Language</span>
-                      </div>
-                      <button 
-                        onClick={() => setSettings(s => ({ ...s, language: s.language === 'en' ? 'bn' : 'en' }))}
-                        className="bg-primary text-white px-4 py-2 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity"
-                      >
-                        {settings.language === 'en' ? 'বাংলা' : 'English'}
-                      </button>
-                    </div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-white/5 light:bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
@@ -3589,7 +3675,8 @@ export default function App() {
               )}
             </AnimatePresence>
           </div>
-        </main>
+        </motion.div>
+      </main>
 
       {/* Detail Modal */}
       <AnimatePresence>
@@ -3606,9 +3693,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-lg bg-card border border-white/10 rounded-[40px] p-8 md:p-10 space-y-8 shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-card border border-white/10 rounded-[40px] p-8 md:p-10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center mb-8 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
                     {detailModalData.type === 'stat' && <Zap size={24} />}
@@ -3626,31 +3713,64 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-6">
+              <div className="flex-1 overflow-y-auto scrollbar-hide space-y-8 pr-1 scroll-smooth overscroll-contain">
                 {detailModalData.type === 'trend' && (
                   <div className="space-y-6">
-                    <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Daily Breakdown (Last 7 Days)</p>
-                      <div className="space-y-2">
+                    <div className="p-6 bg-white/5 rounded-[2rem] border border-white/5 shadow-inner">
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-6 px-2">Weekly Performance Analysis</p>
+                      <div className="space-y-4">
                         {generateChartData(sessions).map((d, i) => (
-                          <div key={`chart-item-${i}-${d.name}`} className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
-                            <span className="text-sm font-bold">{d.name}</span>
-                            <div className="flex items-center gap-2">
-                              <div className="h-1.5 w-24 bg-white/5 rounded-full overflow-hidden">
-                                <div 
-                                  className="h-full bg-primary transition-all duration-500" 
-                                  style={{ width: `${Math.min(100, (d.count / 5) * 100)}%` }}
-                                />
+                          <div key={`chart-item-${i}-${d.name}`} className="group p-4 bg-white/[0.02] hover:bg-white/[0.05] rounded-2xl border border-white/5 transition-all">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-black text-xs">
+                                  {d.name[0]}
+                                </div>
+                                <div>
+                                  <span className="text-sm font-black text-foreground">{d.name}</span>
+                                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{d.total} Sessions</p>
+                                </div>
                               </div>
-                              <span className="text-xs font-bold text-primary">{d.count}</span>
+                              <div className="text-right">
+                                <span className="text-xs font-black text-primary">{d.total > 0 ? Math.round((d.completed / d.total) * 100) : 0}%</span>
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Efficiency</p>
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                                  <motion.div 
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${d.total > 0 ? (d.completed / d.total) * 100 : 0}%` }}
+                                    className="h-full bg-primary shadow-[0_0_10px_rgba(88,86,214,0.4)]" 
+                                  />
+                                </div>
+                                <span className="text-[10px] font-black text-primary w-8 text-right">{d.completed}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                                  <motion.div 
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${d.total > 0 ? (d.incomplete / d.total) * 100 : 0}%` }}
+                                    className="h-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.4)] opacity-60" 
+                                  />
+                                </div>
+                                <span className="text-[10px] font-black text-rose-500 w-8 text-right">{d.incomplete}</span>
+                              </div>
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500 text-center italic">
-                      This chart shows your session frequency over the past week. Consistency is key to long-term retention.
-                    </p>
+                    <div className="p-6 bg-primary/5 rounded-[2rem] border border-primary/10 flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center text-primary shrink-0">
+                        <Zap size={20} />
+                      </div>
+                      <p className="text-xs text-gray-400 font-medium leading-relaxed">
+                        Your consistency is the foundation of your success. This analysis shows your session frequency and completion rate over the past week. Aim for <span className="text-primary font-bold">80%+ efficiency</span> for optimal results.
+                      </p>
+                    </div>
                   </div>
                 )}
 
@@ -3739,12 +3859,14 @@ export default function App() {
                 )}
               </div>
 
-              <button 
-                onClick={() => setDetailModalData(null)}
-                className="w-full py-4 bg-primary text-white rounded-2xl font-bold text-sm shadow-lg shadow-primary/20"
-              >
-                Got it
-              </button>
+              <div className="pt-6 shrink-0">
+                <button 
+                  onClick={() => setDetailModalData(null)}
+                  className="w-full py-4 bg-primary text-white rounded-2xl font-bold text-sm shadow-lg shadow-primary/20"
+                >
+                  Got it
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -3846,10 +3968,10 @@ export default function App() {
 
       {/* Mobile Bottom Nav */}
       <nav className={cn(
-        "md:hidden fixed bottom-0 left-0 right-0 backdrop-blur-2xl px-6 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-around items-center z-[100] transform-gpu translate-z-0 pointer-events-auto transition-all duration-500",
+        "md:hidden fixed bottom-0 left-0 right-0 backdrop-blur-md px-6 py-2 flex justify-around items-center z-[100] transform-gpu translate-z-0 pointer-events-auto transition-all duration-500 border-t",
         settings.dark_mode 
-          ? "bg-[#0A0E14]/90 border-t border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]" 
-          : "bg-white/90 border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]"
+          ? "bg-black/20 border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.2)]" 
+          : "bg-white/20 border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.03)]"
       )}>
         <NavButton active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon={<HomeIcon />} label="HOME" darkMode={settings.dark_mode} />
         <NavButton active={activeTab === 'routine'} onClick={() => setActiveTab('routine')} icon={<Calendar />} label="ROUTINE" darkMode={settings.dark_mode} />
@@ -3937,7 +4059,75 @@ export default function App() {
               className="relative w-full max-w-md bg-card rounded-[32px] p-6 md:p-8 space-y-6 shadow-2xl border border-white/10 max-h-[90vh] overflow-y-auto scrollbar-hide"
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold">{editingSessionId ? 'Edit Task' : 'Add Task'}</h2>
+                <div className="flex items-center gap-4">
+                  <h2 className="text-2xl font-bold">{editingSessionId ? 'Edit Task' : 'Add Task'}</h2>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setIsScheduleModalOpen(true)}
+                      className="w-10 h-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-primary hover:bg-white/10 transition-all active:scale-95"
+                      title="Daily Schedule"
+                    >
+                      <Clock size={18} />
+                    </button>
+                    <div className="relative">
+                      <button 
+                        onClick={() => setShowHomePrintOptions(!showHomePrintOptions)}
+                        className="w-10 h-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-primary hover:bg-white/10 transition-all active:scale-95"
+                        title="Download Diary"
+                      >
+                        <Download size={18} />
+                      </button>
+
+                      <AnimatePresence>
+                        {showHomePrintOptions && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                            className={cn(
+                              "fixed md:absolute left-1/2 md:left-0 top-1/2 md:top-12 -translate-x-1/2 md:translate-x-0 -translate-y-1/2 md:translate-y-0 z-[110] w-[280px] md:w-48 p-6 md:p-4 rounded-3xl md:rounded-xl border shadow-2xl",
+                              settings.dark_mode ? "bg-slate-900 border-white/10" : "bg-white border-slate-200"
+                            )}
+                          >
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-2 text-indigo-500">
+                                <Download size={16} />
+                                <span className="text-xs font-bold uppercase tracking-wider">Download Diary</span>
+                              </div>
+                              
+                              <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Number of Days</label>
+                                <input 
+                                  type="number"
+                                  value={homePrintDays}
+                                  onChange={(e) => setHomePrintDays(e.target.value)}
+                                  className={cn(
+                                    "w-full px-3 py-2 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                    settings.dark_mode ? "bg-slate-900 text-white border-slate-700" : "bg-slate-100 text-slate-900 border-slate-200"
+                                  )}
+                                  placeholder="e.g. 7"
+                                />
+                              </div>
+
+                              <button
+                                onClick={generateHomePDF}
+                                disabled={isGeneratingHomePDF}
+                                className="w-full bg-indigo-500 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition-colors flex items-center justify-center gap-2"
+                              >
+                                {isGeneratingHomePDF ? (
+                                  <RefreshCw size={16} className="animate-spin" />
+                                ) : (
+                                  <Check size={16} />
+                                )}
+                                {isGeneratingHomePDF ? 'Generating...' : 'Done'}
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                </div>
                 <button onClick={() => { setIsModalOpen(false); setEditingSessionId(null); }} className="p-2 text-gray-400 hover:text-white transition-colors">
                   <X size={24} />
                 </button>
@@ -3966,6 +4156,7 @@ export default function App() {
           setSchedules(newSchedules);
           storage.deleteSchedule(user?.id || 'guest_user', id);
         }}
+        onOpenPrayerTimes={() => setIsPrayerModalOpen(true)}
         darkMode={settings.dark_mode}
       />
       <PrayerModal 
@@ -3995,10 +4186,11 @@ interface ScheduleModalProps {
   schedules: ScheduleItem[];
   onSave: (schedule: ScheduleItem) => void;
   onDelete: (id: string) => void;
+  onOpenPrayerTimes: () => void;
   darkMode: boolean;
 }
 
-function ScheduleModal({ isOpen, onClose, schedules, onSave, onDelete, darkMode }: ScheduleModalProps) {
+function ScheduleModal({ isOpen, onClose, schedules, onSave, onDelete, onOpenPrayerTimes, darkMode }: ScheduleModalProps) {
   const [startTime, setStartTime] = useState('08:00');
   const [endTime, setEndTime] = useState('09:00');
   const [task, setTask] = useState('');
@@ -4075,6 +4267,15 @@ function ScheduleModal({ isOpen, onClose, schedules, onSave, onDelete, darkMode 
                 title={editingId ? "Cancel Edit" : "Add to Schedule"}
               >
                 {editingId ? <X size={24} strokeWidth={2.5} /> : <PlusCircle size={24} strokeWidth={2.5} />}
+              </button>
+              <button 
+                onClick={onOpenPrayerTimes}
+                className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"
+                )}
+                title="Prayer Times"
+              >
+                <Sunrise size={24} strokeWidth={2.5} />
               </button>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-xl transition-colors text-gray-400">
@@ -4466,31 +4667,28 @@ function SidebarLink({ active, onClick, icon, label }: { active: boolean; onClic
 function NavButton({ active, onClick, icon, label, darkMode }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; darkMode: boolean }) {
   return (
     <motion.button 
-      whileTap={{ scale: 0.9 }}
+      whileTap={{ scale: 0.8 }}
+      whileHover={{ scale: 1.1 }}
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center gap-1 transition-all duration-500 relative",
+        "flex flex-col items-center justify-center transition-all duration-500 relative",
         active 
           ? "text-primary" 
           : (darkMode ? "text-gray-500" : "text-gray-400")
       )}
     >
       <div className={cn(
-        "w-12 h-12 flex items-center justify-center rounded-[1.25rem] transition-all duration-500",
+        "w-10 h-10 flex items-center justify-center rounded-full transition-all duration-500",
         active 
-          ? "bg-primary/10 scale-110" 
-          : (darkMode ? "bg-transparent" : "bg-transparent")
+          ? (darkMode ? "bg-primary/20" : "bg-primary/10")
+          : "bg-transparent"
       )}>
         {React.cloneElement(icon as React.ReactElement, { 
-          size: 22, 
+          size: 20, 
           strokeWidth: active ? 2.5 : 2,
           className: cn("transition-all duration-500", active ? "text-primary" : "text-current")
         })}
       </div>
-      <span className={cn(
-        "text-[9px] font-black tracking-tighter transition-all duration-500",
-        active ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
-      )}>{label}</span>
     </motion.button>
   );
 }
@@ -4535,7 +4733,7 @@ function StatCard({ icon, label, value, color, onClick, trend }: { icon: React.R
   );
 }
 
-const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isExpanded, dragControls }: { session: StudySession; onToggle: () => void; onDelete: () => void; onEdit: () => void; onClick: () => void; isExpanded: boolean; dragControls: any }) => {
+const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isExpanded, dragControls, darkMode }: { session: StudySession; onToggle: () => void; onDelete: () => void; onEdit: () => void; onClick: () => void; isExpanded: boolean; dragControls: any; darkMode: boolean }) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const deleteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isHolding, setIsHolding] = useState(false);
@@ -4604,64 +4802,165 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isE
       onPointerLeave={handleBoxPointerUp}
       onPointerCancel={handleBoxPointerUp}
       className={cn(
-        "group flex flex-col gap-4 p-4 rounded-2xl transition-all cursor-pointer select-none relative",
-        "will-change-transform", // GPU acceleration hint
-        session.completed ? "bg-white/5 opacity-60" : "bg-card shadow-sm",
-        isDeleting && "scale-[0.98] opacity-80"
+        "group flex flex-col gap-3 p-5 rounded-[32px] transition-all cursor-pointer select-none relative overflow-hidden",
+        "will-change-transform",
+        session.completed 
+          ? (darkMode ? "bg-white/[0.03] opacity-70" : "bg-gray-100 opacity-70")
+          : (darkMode 
+              ? "bg-[#111827] border-white/5 shadow-2xl shadow-black/40 hover:border-indigo-500/30" 
+              : "bg-white border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/5 hover:border-indigo-500/30"),
+        isDeleting && "scale-[0.96] opacity-60"
       )}
       style={{ 
-        transform: 'translateZ(0)' // Force GPU layer
+        transform: 'translateZ(0)'
       }}
     >
-      <div className="flex items-center gap-4 w-full">
+      {/* Dynamic Accent Glow */}
+      {!session.completed && (
+        <div 
+          className={cn(
+            "absolute -right-16 -top-16 w-40 h-40 blur-[60px] transition-opacity duration-700 pointer-events-none",
+            darkMode ? "opacity-[0.12] group-hover:opacity-[0.2]" : "opacity-[0.08] group-hover:opacity-[0.15]"
+          )}
+          style={{ backgroundColor: session.color }}
+        />
+      )}
+
+      {/* Subtle Glass Shine */}
+      <div className={cn(
+        "absolute inset-0 bg-gradient-to-tr from-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000 pointer-events-none",
+        darkMode ? "via-white/[0.05]" : "via-black/[0.02]"
+      )} />
+
+      <div className="flex items-center gap-5 w-full relative z-10">
+        {/* Modern Checkbox */}
         <button 
           onClick={(e) => {
             e.stopPropagation();
             onToggle();
           }}
           className={cn(
-            "w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0",
-            session.completed ? "bg-primary border-primary" : "border-white/20 hover:border-primary/50"
+            "w-8 h-8 rounded-2xl border-2 flex items-center justify-center shrink-0 transition-all duration-500 relative",
+            session.completed 
+              ? "bg-emerald-500 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.4)]" 
+              : (darkMode 
+                  ? "border-white/10 bg-white/5 hover:border-primary/50" 
+                  : "border-slate-200 bg-slate-50 hover:border-primary/50 hover:scale-110")
           )}
         >
-          {session.completed && <Zap size={12} className="text-white fill-white" />}
+          <AnimatePresence mode="wait">
+            {session.completed ? (
+              <motion.svg 
+                key="check"
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="4" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                className="w-4 h-4 text-white"
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={{ pathLength: 1, opacity: 1 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+              >
+                <motion.path d="M20 6L9 17L4 12" />
+              </motion.svg>
+            ) : (
+              <motion.div 
+                key="dot"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className={cn(
+                  "w-2 h-2 rounded-full transition-colors",
+                  darkMode ? "bg-white/20 group-hover:bg-primary/40" : "bg-black/10 group-hover:bg-primary/40"
+                )} 
+              />
+            )}
+          </AnimatePresence>
         </button>
+
+        {/* Content Hierarchy */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className={cn("font-bold text-sm truncate", session.completed && "line-through text-gray-500")}>{session.subject}</p>
+          <div className="flex items-center gap-3 mb-1">
+            <p className={cn(
+              "font-bold text-[17px] truncate tracking-tight transition-all duration-500", 
+              session.completed 
+                ? "text-muted-foreground/60 line-through" 
+                : (darkMode ? "text-white group-hover:text-primary" : "text-slate-900 group-hover:text-primary")
+            )}>
+              {session.subject}
+            </p>
+            {session.reminder_time && !session.completed && (
+              <div className={cn(
+                "px-2.5 py-0.5 rounded-full flex items-center gap-2 shrink-0 border",
+                darkMode ? "bg-primary/10 border-primary/20" : "bg-primary/5 border-primary/10"
+              )}>
+                <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary-rgb),0.6)] animate-pulse" />
+                <span className="text-[10px] font-black text-primary/80 uppercase tracking-widest">{session.reminder_time}</span>
+              </div>
+            )}
           </div>
-          <p className="text-xs text-gray-500 truncate">{session.chapter}</p>
+          <div className="flex items-center gap-2">
+            <p className={cn(
+              "text-[14px] font-semibold truncate transition-all duration-500",
+              session.completed 
+                ? "text-muted-foreground/40" 
+                : (darkMode ? "text-slate-400 group-hover:text-slate-200" : "text-slate-500 group-hover:text-slate-700")
+            )}>
+              {session.chapter}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+
+        {/* Action Elements */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={(e) => {
               e.stopPropagation();
               onEdit();
             }}
-            className="p-2 text-gray-400 hover:text-primary transition-colors"
+            className={cn(
+              "p-3 rounded-[20px] transition-all duration-300",
+              darkMode 
+                ? "text-slate-400 hover:text-white hover:bg-white/5" 
+                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+            )}
           >
             <Edit size={18} />
           </button>
+          
           <motion.div 
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
             onPointerCancel={handlePointerUp}
             animate={{ 
-              scale: isHolding ? 1.1 : 1,
-              boxShadow: isHolding ? "0px 0px 25px rgba(0,0,0,0.3)" : "none"
+              scale: isHolding ? 1.2 : 1,
+              rotate: isHolding ? [0, -8, 8, -8, 0] : 0,
+              boxShadow: isHolding ? `0 0 30px ${session.color}40` : "none"
             }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            className="w-10 h-10 rounded-xl flex items-center justify-center cursor-grab active:cursor-grabbing touch-none relative" 
-            style={{ backgroundColor: `${session.color}20`, color: session.color }}
+            transition={{ rotate: { repeat: Infinity, duration: 0.15 } }}
+            className="w-12 h-12 rounded-[22px] flex items-center justify-center cursor-grab active:cursor-grabbing touch-none relative transition-all duration-500 shadow-sm" 
+            style={{ 
+              backgroundColor: `${session.color}15`, 
+              color: session.color,
+              border: `1px solid ${session.color}20`
+            }}
           >
-            <IconRenderer name={session.icon} size={20} />
+            <IconRenderer name={session.icon} size={24} />
+            
+            {/* Jewel Glow */}
+            <div 
+              className="absolute inset-0 rounded-[22px] opacity-0 group-hover:opacity-30 transition-opacity blur-xl"
+              style={{ backgroundColor: session.color }}
+            />
+
             {isHolding && (
               <motion.div 
-                initial={{ scale: 0, opacity: 0.8 }}
-                animate={{ scale: 1.2, opacity: 0 }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-                className="absolute inset-0 rounded-xl border-2 border-primary pointer-events-none"
+                initial={{ scale: 0.8, opacity: 0.6 }}
+                animate={{ scale: 2, opacity: 0 }}
+                transition={{ duration: 0.7, ease: "circOut" }}
+                className="absolute inset-0 rounded-[22px] border-2 border-primary/40 pointer-events-none"
               />
             )}
           </motion.div>
@@ -4676,11 +4975,29 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isE
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="pt-4 border-t border-white/5 flex justify-between items-end gap-4">
-              <div className="space-y-1 flex-1">
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Topics</p>
-                <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
-                  {session.topics || 'No topics specified'}
+            <div className={cn(
+              "pt-5 mt-2 border-t flex flex-col gap-3",
+              darkMode ? "border-white/5" : "border-black/[0.03]"
+            )}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full shadow-[0_0_10px_currentColor]" style={{ backgroundColor: session.color, color: session.color }} />
+                  <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em]">Session Insights</p>
+                </div>
+                <div className={cn(
+                  "h-[1px] flex-1 mx-6 bg-gradient-to-r to-transparent",
+                  darkMode ? "from-white/10" : "from-black/[0.05]"
+                )} />
+              </div>
+              <div className={cn(
+                "rounded-2xl p-4 border",
+                darkMode ? "bg-white/[0.02] border-white/5" : "bg-black/[0.01] border-black/[0.02]"
+              )}>
+                <p className={cn(
+                  "text-[14px] leading-relaxed whitespace-pre-wrap font-medium",
+                  darkMode ? "text-slate-400" : "text-slate-500"
+                )}>
+                  {session.topics || 'Focus on the core concepts and complete the assigned exercises.'}
                 </p>
               </div>
             </div>
@@ -4691,7 +5008,7 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isE
   );
 });
 
-const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onEdit, onClick, isExpanded }: any) => {
+const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onEdit, onClick, isExpanded, darkMode }: any) => {
   const dragControls = useDragControls();
   return (
     <Reorder.Item 
@@ -4719,6 +5036,7 @@ const ReorderableTaskItem = ({ s, index, onToggle, onDelete, onEdit, onClick, is
         onClick={onClick}
         isExpanded={isExpanded}
         dragControls={dragControls}
+        darkMode={darkMode}
       />
     </Reorder.Item>
   );
@@ -4871,14 +5189,16 @@ function generateChartData(sessions: StudySession[]) {
 
   return last7Days.map(date => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    const count = sessions.filter(s => {
-      // Use string comparison for yyyy-MM-dd dates to avoid timezone issues
+    const daySessions = sessions.filter(s => {
       const sessionDateStr = s.date.includes('T') ? format(new Date(s.date), 'yyyy-MM-dd') : s.date;
       return sessionDateStr === dateStr;
-    }).length;
+    });
+
     return {
       name: format(date, 'eee'),
-      count: count
+      completed: daySessions.filter(s => s.completed).length,
+      incomplete: daySessions.filter(s => !s.completed).length,
+      total: daySessions.length
     };
   });
 }
