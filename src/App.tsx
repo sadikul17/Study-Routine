@@ -91,13 +91,17 @@ import {
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { storage, type StudySession, type AppSettings, type UserProfile, type TimerState, getWeekDays, type RoutineItem, safeParse, type PrayerSettings, type PrayerTime, type ScheduleItem } from './types';
+import { storage, type StudySession, type AppSettings, type UserProfile, type TimerState, getWeekDays, type RoutineItem, safeParse, type PrayerSettings, type PrayerTime, type ScheduleItem, type StudyTimerState, type StudyHistory } from './types';
 import { supabase } from './lib/supabase';
 import { AuthPage } from './components/AuthPage';
 import { notificationService } from './lib/notifications';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
+import io from 'socket.io-client';
+
+const socket = io();
+
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -331,6 +335,299 @@ const RoutineCard = ({
   );
 };
 
+
+const FlaskModal = ({ isOpen, onClose, focusTime, isFocusActive, darkMode, goalHours, onSetGoal }: any) => {
+  const lastClickTime = useRef(0);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const maxSeconds = goalHours * 3600;
+  const fillPercentage = Math.min((focusTime / maxSeconds) * 100, 100);
+  const isFull = fillPercentage >= 100;
+  
+  // Adjusted Water Level calculation for better visibility
+  // 142 is bottom, 50 is base-top, 20 is neck-top
+  // Higher fill percentage = lower Y value (higher in the bottle)
+  // We map 0-100 to 142-20
+  const waterLevelY = 142 - (fillPercentage * 1.22);
+
+  const handleDoubleClick = () => {
+    const now = Date.now();
+    if (now - lastClickTime.current < 300) {
+      onClose();
+    }
+    lastClickTime.current = now;
+  };
+
+  return (
+    <div 
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-3xl touch-none" 
+      onClick={handleDoubleClick}
+    >
+      <motion.div 
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 500 }}
+        dragElastic={0.2}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 100) {
+            onClose();
+          }
+        }}
+        initial={{ opacity: 0, scale: 0.8, y: -100 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.8, y: 100 }}
+        className={cn(
+          "w-full max-w-[330px] p-6 py-10 rounded-[4rem] border shadow-[0_0_100px_rgba(14,165,233,0.1)] flex flex-col items-center gap-6 relative overflow-hidden",
+          darkMode ? "bg-slate-950/95 border-white/10" : "bg-white/95 border-slate-200"
+        )}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 w-12 h-1.5 rounded-full bg-white/20 opacity-30" />
+        
+        {/* Goal Adjuster */}
+        <div className="flex items-center gap-4 relative z-10 bg-white/5 backdrop-blur-xl px-4 py-2 rounded-2xl border border-white/10 shadow-xl">
+          <button 
+            onClick={() => onSetGoal(Math.max(1, goalHours - 1))}
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-sky-500/20 hover:bg-sky-500/40 transition-all text-sky-400 font-bold active:scale-95"
+          >
+            -
+          </button>
+          <div className="text-center min-w-[80px]">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-400 mb-0.5">GOAL</p>
+            <p className={cn("text-xl font-black tracking-tighter", darkMode ? "text-white" : "text-slate-950")}>{goalHours}H</p>
+          </div>
+          <button 
+            onClick={() => onSetGoal(Math.min(24, goalHours + 1))}
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-sky-500/20 hover:bg-sky-500/40 transition-all text-sky-400 font-bold active:scale-95"
+          >
+            +
+          </button>
+        </div>
+
+        {/* Realistic Erlenmeyer Flask */}
+        <div className="relative w-64 h-80 flex items-center justify-center">
+          <svg viewBox="0 0 100 150" className="w-full h-full drop-shadow-[0_15px_30px_rgba(14,165,233,0.25)] overflow-visible">
+            <defs>
+              <linearGradient id="skyWaterGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#0891b2" /> 
+                <stop offset="100%" stopColor="#155e75" /> 
+              </linearGradient>
+              
+              <radialGradient id="waterSurfaceGlow" cx="50%" cy="0%" r="50%">
+                <stop offset="0%" stopColor="rgba(255,255,255,0.6)" />
+                <stop offset="100%" stopColor="transparent" />
+              </radialGradient>
+
+              <filter id="glassBlur">
+                <feGaussianBlur stdDeviation="1" />
+              </filter>
+            </defs>
+
+            {/* Ground Reflection & Overflow */}
+            <ellipse cx="50" cy="144" rx="40" ry="6" fill="rgba(14,165,233,0.1)" filter="blur(10px)" />
+            
+            {isFull && (
+              <g>
+                {/* Spilled water puddle on ground */}
+                <motion.ellipse 
+                  cx="50" cy="144" rx="45" ry="8" 
+                  fill="#0891b2" 
+                  style={{ opacity: 0.3 }}
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 0.3 }}
+                  transition={{ duration: 2, ease: "easeOut" }}
+                />
+                {/* Scattered spilled droplets around the flask */}
+                {[
+                  { x: 22, y: 143, r: 2.5 },
+                  { x: 78, y: 145, r: 2 },
+                  { x: 35, y: 147, r: 1.5 },
+                  { x: 65, y: 142, r: 1.8 },
+                  { x: 40, y: 141, r: 1.2 },
+                  { x: 60, y: 148, r: 1.4 }
+                ].map((d, i) => (
+                  <motion.circle
+                    key={`ground-drop-${i}`}
+                    cx={d.x}
+                    cy={d.y}
+                    r={d.r}
+                    fill="#0891b2"
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 0.6, scale: 1 }}
+                    transition={{ delay: 0.5 + (i * 0.2), duration: 1 }}
+                  />
+                ))}
+              </g>
+            )}
+
+            {/* Erlenmeyer Flask Path */}
+            <path 
+              id="erlenmeyer-path"
+              d="M42 20 L58 20 L58 50 L95 132 C98 142 2 142 5 132 L42 50 Z" 
+              fill="rgba(255,255,255,0.05)"
+              stroke={darkMode ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.1)"}
+              strokeWidth="2"
+            />
+            
+            {/* Water Mask */}
+            <mask id="flask-water-mask">
+              <path d="M42 20 L58 20 L58 50 L95 132 C98 142 2 142 5 132 L42 50 Z" fill="white" />
+            </mask>
+            
+            <g mask="url(#flask-water-mask)">
+              {/* Main Water Body */}
+              <motion.rect 
+                x="0" 
+                width="100" 
+                height="150" 
+                fill="url(#skyWaterGradient)"
+                initial={{ y: 150 }}
+                animate={{ y: isFocusActive ? [waterLevelY, waterLevelY + 1.2, waterLevelY] : waterLevelY }}
+                transition={{ 
+                  y: isFocusActive 
+                    ? { duration: 2, repeat: Infinity, repeatType: "loop", ease: "easeInOut" } 
+                    : { type: "spring", damping: 25, stiffness: 45 } 
+                }}
+              />
+              
+              {/* Surface Highlight/Liquid Look */}
+              <motion.ellipse
+                cx="50"
+                cy={waterLevelY}
+                rx="50"
+                ry="3"
+                fill="url(#waterSurfaceGlow)"
+                animate={{ y: isFocusActive ? [0, 1.2, 0] : 0 }}
+                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+              />
+
+              {/* Bubbles */}
+              {isFocusActive && Array.from({ length: 15 }).map((_, i) => (
+                <motion.circle
+                  key={i}
+                  r={Math.random() * 1.5 + 0.5}
+                  fill="rgba(255,255,255,0.45)"
+                  initial={{ cx: 20 + Math.random() * 60, cy: 135 }}
+                  animate={{ 
+                    cy: [135, waterLevelY + 10],
+                    opacity: [0, 0.8, 0],
+                    x: [0, (Math.random() - 0.5) * 12, 0]
+                  }}
+                  transition={{ 
+                    duration: 3 + Math.random() * 2, 
+                    repeat: Infinity, 
+                    delay: Math.random() * 5,
+                    ease: "easeOut"
+                  }}
+                />
+              ))}
+
+              {/* Ripples at Surface */}
+              {isFocusActive && (
+                <g>
+                  {[0, 0.3, 0.6].map((delay, i) => (
+                    <motion.ellipse
+                      key={`ripple-${i}`}
+                      cx="50"
+                      cy={waterLevelY}
+                      rx="0"
+                      ry="0"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.4)"
+                      strokeWidth="0.5"
+                      animate={{
+                        rx: [0, 20],
+                        ry: [0, 3],
+                        opacity: [0.8, 0],
+                      }}
+                      transition={{
+                        duration: 1.5,
+                        repeat: Infinity,
+                        delay: delay + 1.0, // Start after drop hits
+                        ease: "easeOut"
+                      }}
+                    />
+                  ))}
+                </g>
+              )}
+            </g>
+
+            {/* Shiny Glass Reflections */}
+            <path 
+              d="M45 25 L45 50 L15 125" 
+              fill="none" 
+              stroke="rgba(255,255,255,0.3)" 
+              strokeWidth="3" 
+              strokeLinecap="round"
+              filter="url(#glassBlur)"
+            />
+            <ellipse cx="50" cy="20" rx="9" ry="3" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2" />
+
+            {/* Falling Water Drop (Realistic teardrop) */}
+            {isFocusActive && (
+              <g>
+                <motion.path
+                  d="M50 20 C 50 20, 53 28, 50 32 C 47 28, 50 20, 50 20"
+                  fill="#0891b2"
+                  initial={{ y: -10, opacity: 0, scaleY: 0.8 }}
+                  animate={{
+                    y: [0, waterLevelY - 20],
+                    opacity: [0, 1, 1, 1],
+                    scaleY: [0.8, 1.5, 1],
+                    scaleX: [1.2, 0.7, 1]
+                  }}
+                  transition={{
+                    duration: 1,
+                    repeat: Infinity,
+                    ease: [0.4, 0, 1, 1], // Custom easing for gravity
+                  }}
+                />
+                
+                {/* Impact Splash removed */}
+              </g>
+            )}
+          </svg>
+        </div>
+
+        <div className="w-full space-y-4 relative z-10 text-center">
+          <div className="flex justify-between items-end px-2">
+            <div className="text-left">
+              <p className={cn("text-[9px] font-black uppercase tracking-[0.2em] opacity-40", darkMode ? "text-white" : "text-slate-950")}>VOLUME</p>
+              <p className={cn("text-3xl font-black tracking-tighter tabular-nums", darkMode ? "text-white" : "text-slate-950")}>
+                {Math.floor(focusTime / 3600)}<span className="text-sky-400 text-sm ml-1">H</span> {Math.floor((focusTime % 3600) / 60)}<span className="text-sky-400 text-sm ml-1">M</span>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className={cn("text-[9px] font-black uppercase tracking-[0.2em] opacity-40", darkMode ? "text-white" : "text-slate-950")}>PERCENT</p>
+              <p className="text-3xl font-black text-sky-400 tracking-tighter tabular-nums">
+                {fillPercentage.toFixed(1)}<span className="text-sm ml-1">%</span>
+              </p>
+            </div>
+          </div>
+          
+          <div className={cn("h-3 w-full rounded-2xl overflow-hidden p-1 shadow-inner", darkMode ? "bg-white/5" : "bg-slate-100/30")}>
+            <motion.div 
+              className="h-full bg-gradient-to-r from-sky-400 via-sky-300 to-sky-500 rounded-xl shadow-[0_0_15px_rgba(14,165,233,0.4)]"
+              initial={{ width: 0 }}
+              animate={{ width: `${fillPercentage}%` }}
+              transition={{ duration: 1, ease: "circOut" }}
+            />
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const PrayerModal = ({ isOpen, onClose, settings, onSave, darkMode }: any) => {
   const [localSettings, setLocalSettings] = useState<PrayerSettings>(settings);
   const [isFetching, setIsFetching] = useState(false);
@@ -551,6 +848,7 @@ const PrayerModal = ({ isOpen, onClose, settings, onSave, darkMode }: any) => {
     </div>
   );
 };
+
 
 const RoutinePage = ({ 
   routines, 
@@ -1534,9 +1832,10 @@ const Timer = ({
   const [showSettings, setShowSettings] = useState(false);
 
   const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
+    const safeSeconds = (typeof seconds !== 'number' || isNaN(seconds)) ? 0 : seconds;
+    const hours = Math.floor(safeSeconds / 3600);
+    const mins = Math.floor((safeSeconds % 3600) / 60);
+    const secs = safeSeconds % 60;
     if (hours > 0) {
       return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
@@ -1819,10 +2118,12 @@ export default function App() {
   
   const handleSwipe = (direction: 'left' | 'right') => {
     const currentIndex = tabs.indexOf(activeTab);
-    if (direction === 'right') {
+    if (direction === 'left') {
+      // Swiping left (finger moves right to left) -> Go to NEXT tab
       const nextIndex = (currentIndex + 1) % tabs.length;
       setActiveTab(tabs[nextIndex]);
     } else {
+      // Swiping right (finger moves left to right) -> Go to PREVIOUS tab
       const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
       setActiveTab(tabs[prevIndex]);
     }
@@ -1899,6 +2200,26 @@ export default function App() {
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isFlaskModalOpen, setIsFlaskModalOpen] = useState(false);
+  const [flaskGoalHours, setFlaskGoalHours] = useState(12);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const isLongPressDetected = useRef(false);
+
+  const startLongPress = () => {
+    isLongPressDetected.current = false;
+    longPressTimer.current = setTimeout(() => {
+      setIsFlaskModalOpen(true);
+      isLongPressDetected.current = true;
+    }, 600); // 600ms for long press
+  };
+
+  const endLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
@@ -1939,6 +2260,206 @@ export default function App() {
   const [isGeneratingHomePDF, setIsGeneratingHomePDF] = useState(false);
   const [showHomePrintOptions, setShowHomePrintOptions] = useState(false);
   const [homePrintDays, setHomePrintDays] = useState('7');
+  const [includeRoutineInHomePDF, setIncludeRoutineInHomePDF] = useState(false);
+
+  // --- Study Focus Timer Logic ---
+  const [focusTime, setFocusTime] = useState<{ [date: string]: number }>(() => ({}));
+
+  // Unique guest ID for guest-mode sync on same device
+  const getGuestId = () => {
+    let gid = localStorage.getItem('unique_guest_id');
+    if (!gid) {
+      gid = 'guest_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('unique_guest_id', gid);
+    }
+    return gid;
+  };
+
+  const getEffectiveUserId = () => user?.id || getGuestId();
+
+  // Flask Goal Persistence
+  useEffect(() => {
+    const effectiveId = getEffectiveUserId();
+    const saved = localStorage.getItem(`flask_goal_hours_${effectiveId}`);
+    if (saved) {
+      setFlaskGoalHours(parseInt(saved));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const effectiveId = getEffectiveUserId();
+    localStorage.setItem(`flask_goal_hours_${effectiveId}`, flaskGoalHours.toString());
+  }, [flaskGoalHours, user]);
+
+  // Fetch Focus Stats from SQL Database
+  useEffect(() => {
+    fetch('/api/focus-stats')
+      .then(res => res.json())
+      .then(data => {
+        setFocusTime(prev => ({ ...prev, ...data }));
+      })
+      .catch(err => console.error("Error fetching SQL focus stats:", err));
+  }, []);
+
+  const [isFocusActive, setIsFocusActive] = useState(() => {
+    return localStorage.getItem('study_focus_active') === 'true';
+  });
+  const [focusStartTime, setFocusStartTime] = useState<number | null>(() => {
+    const saved = localStorage.getItem('study_focus_start_time');
+    if (!saved || saved === 'null') return null;
+    const parsed = parseInt(saved);
+    return isNaN(parsed) ? null : parsed;
+  });
+
+  // Sync Timer across devices/tabs
+  useEffect(() => {
+    const effectiveId = getEffectiveUserId();
+    if (effectiveId) {
+      socket.emit('join_user_room', effectiveId);
+      
+      socket.on('timer_sync', (data: { is_active: boolean, start_time: number | null }) => {
+        setIsFocusActive(!!data.is_active);
+        if (data.start_time && typeof data.start_time === 'number' && !isNaN(data.start_time)) {
+          setFocusStartTime(data.start_time);
+        } else {
+          setFocusStartTime(null);
+        }
+      });
+
+      // Optional: Fetch state from Supabase if logged in
+      if (user?.id) {
+        storage.getStudyTimer(user.id).then(timerData => {
+          if (timerData) {
+            // Only update if it's different and not already running faster locally
+            // We trust the cloud state for login sync
+            setIsFocusActive(!!timerData.is_running);
+            const cloudStartTime = timerData.last_started_at;
+            if (cloudStartTime && typeof cloudStartTime === 'number' && !isNaN(cloudStartTime)) {
+              setFocusStartTime(cloudStartTime);
+            }
+          }
+        });
+      }
+
+      return () => {
+        socket.off('timer_sync');
+      };
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (user) {
+      storage.saveFocusTime(user.id, format(new Date(), 'yyyy-MM-dd'), getTodayFocusTime());
+    }
+    localStorage.setItem('study_focus_data', JSON.stringify(focusTime));
+    
+    // Save to SQL Database (only for today's data to avoid heavy sync)
+    const today = format(new Date(), 'yyyy-MM-dd');
+    if (focusTime[today] !== undefined) {
+      fetch('/api/focus-stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: today, duration: focusTime[today] })
+      }).catch(err => console.error("Error saving to SQL database:", err));
+    }
+  }, [focusTime, user]);
+
+  useEffect(() => {
+    localStorage.setItem('study_focus_active', isFocusActive.toString());
+  }, [isFocusActive]);
+
+  useEffect(() => {
+    if (focusStartTime) {
+      localStorage.setItem('study_focus_start_time', focusStartTime.toString());
+    } else {
+      localStorage.removeItem('study_focus_start_time');
+    }
+  }, [focusStartTime]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isFocusActive && focusStartTime) {
+      interval = setInterval(() => {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const now = Date.now();
+        if (!focusStartTime || isNaN(focusStartTime)) return;
+        
+        const elapsedSeconds = Math.floor((now - focusStartTime) / 1000);
+        
+        if (elapsedSeconds > 0 && !isNaN(elapsedSeconds)) {
+          setFocusTime(prev => {
+            const currentDayTime = prev[today] || 0;
+            const safeCurrentDayTime = isNaN(currentDayTime) ? 0 : currentDayTime;
+            return {
+              ...prev,
+              [today]: safeCurrentDayTime + elapsedSeconds
+            };
+          });
+          setFocusStartTime(now);
+        }
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isFocusActive, focusStartTime]);
+
+  const toggleFocus = () => {
+    const newActiveState = !isFocusActive;
+    const newStartTime = newActiveState ? Date.now() : null;
+    
+    setIsFocusActive(newActiveState);
+    setFocusStartTime(newStartTime);
+    
+    const effectiveId = getEffectiveUserId();
+    if (effectiveId) {
+      socket.emit('timer_toggle', {
+        userId: effectiveId,
+        is_active: newActiveState,
+        start_time: newStartTime
+      });
+    }
+
+    // Persist to Supabase if logged in
+    if (user?.id) {
+      storage.saveStudyTimer(user.id, {
+        is_running: newActiveState,
+        last_started_at: newStartTime,
+        seconds: getTodayFocusTime(),
+        last_saved_at: Date.now(),
+        last_updated_at: format(new Date(), 'yyyy-MM-dd')
+      });
+    }
+  };
+
+  const getTodayFocusTime = () => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const val = focusTime[today];
+    if (typeof val !== 'number' || isNaN(val)) return 0;
+    return val;
+  };
+
+  const formatFocusTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  const [focusRange, setFocusRange] = useState<7 | 30 | 365>(7);
+
+  const generateFocusChartData = () => {
+    return Array.from({ length: focusRange }).map((_, i) => {
+      const d = subDays(new Date(), i);
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const seconds = focusTime[dateStr] || 0;
+      return {
+        name: format(d, 'MMM d'),
+        hours: parseFloat((seconds / 3600).toFixed(2)),
+        rawSeconds: seconds
+      };
+    }).reverse();
+  };
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 
   const lastSupabaseSaveRef = useRef<number>(0);
@@ -2050,6 +2571,7 @@ export default function App() {
     const trashKey = `cached_trash_${userId}`;
     const routinesKey = `cached_routines_${userId}`;
     const prayerKey = `cached_prayer_settings_${userId}`;
+    const focusKey = `cached_focus_time_${userId}`;
     
     const cachedSessions = localStorage.getItem(cacheKey);
     const cachedTrash = localStorage.getItem(trashKey);
@@ -2057,6 +2579,7 @@ export default function App() {
     const cachedSettings = localStorage.getItem(`cached_settings_${userId}`);
     const cachedProfile = localStorage.getItem(`cached_profile_${userId}`);
     const cachedPrayer = localStorage.getItem(prayerKey);
+    const cachedFocus = localStorage.getItem(focusKey);
     
     try {
       if (cachedSessions) setSessions(JSON.parse(cachedSessions));
@@ -2065,6 +2588,7 @@ export default function App() {
       if (cachedSettings) setSettings(JSON.parse(cachedSettings));
       if (cachedProfile) setProfile(JSON.parse(cachedProfile));
       if (cachedPrayer) setPrayerSettings(JSON.parse(cachedPrayer));
+      if (cachedFocus) setFocusTime(JSON.parse(cachedFocus));
     } catch (e) {
       console.warn('Error parsing cached data:', e);
     }
@@ -2077,13 +2601,14 @@ export default function App() {
         return;
       }
 
-      const [sessionsData, trashData, routinesData, settingsData, profileData, prayerData] = await Promise.all([
+      const [sessionsData, trashData, routinesData, settingsData, profileData, prayerData, focusData] = await Promise.all([
         storage.getSessions(userId),
         storage.getTrash(userId),
         storage.getRoutines(userId),
         storage.getSettings(userId),
         storage.getProfile(userId),
-        storage.getPrayerSettings(userId)
+        storage.getPrayerSettings(userId),
+        storage.getFocusTime(userId)
       ]);
       
       setSessions(sessionsData);
@@ -2092,6 +2617,7 @@ export default function App() {
       setSettings(settingsData);
       setProfile(profileData);
       setPrayerSettings(prayerData);
+      setFocusTime(focusData);
       console.log('[App] Background fetch complete');
     } catch (error) {
       console.warn('Background sync failed:', error);
@@ -2101,12 +2627,22 @@ export default function App() {
   useEffect(() => {
     // Check session validity on mount to handle "Invalid Refresh Token" errors
     const checkSession = async () => {
+      // Try to load last user from cache for instant UI if offline
+      const lastUserId = localStorage.getItem('last_auth_user_id');
+      const wasGuest = localStorage.getItem('is_guest_mode') === 'true';
+      
+      if (lastUserId && lastUserId !== 'guest_user') {
+        // Pre-load data for this user
+        refreshData(lastUserId);
+      } else if (wasGuest) {
+        setIsGuestMode(true);
+        refreshData('guest_user');
+      }
+
       const timeout = setTimeout(() => {
-        if (isAuthLoading) {
-          console.warn('[App] Auth check timed out, proceeding with local state');
-          setIsAuthLoading(false);
-        }
-      }, 5000); // 5 second timeout
+        setIsAuthLoading(false);
+        console.warn('[App] Auth check timed out, proceeding with local state');
+      }, 2500); // Reduced timeout for better UX
 
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
@@ -2115,6 +2651,8 @@ export default function App() {
         if (session?.user) {
           console.log('[App] Initial session found:', session.user.id);
           setUser(session.user);
+          localStorage.setItem('last_auth_user_id', session.user.id);
+          localStorage.setItem('is_guest_mode', 'false');
           setIsAuthLoading(false);
           refreshData(session.user.id);
         } else {
@@ -2125,6 +2663,7 @@ export default function App() {
         if (error) {
           if (error.message.includes('Refresh Token Not Found') || error.message.includes('Invalid Refresh Token')) {
             console.warn('Invalid session detected, signing out to clear state');
+            localStorage.removeItem('last_auth_user_id');
             await supabase.auth.signOut();
           }
         }
@@ -2210,6 +2749,9 @@ export default function App() {
       console.error('Error signing out:', e);
     }
     // Clear all local storage related to auth to be sure
+    localStorage.removeItem('last_auth_user_id');
+    localStorage.removeItem('is_guest_mode');
+    
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -2228,8 +2770,11 @@ export default function App() {
 
   const handleGuestUser = () => {
     setIsGuestMode(true);
+    localStorage.setItem('is_guest_mode', 'true');
+    localStorage.setItem('last_auth_user_id', 'guest_user');
     setUser({ id: 'guest_user', email: 'guest@example.com' });
     setActiveTab('home');
+    refreshData('guest_user');
   };
 
   // Auto-sync every hour
@@ -2286,6 +2831,7 @@ export default function App() {
       
       // 1. Load from local cache immediately for fast UI
       let hasAnyCache = false;
+      
       try {
         const cachedSessions = localStorage.getItem(`cached_sessions_${user.id}`);
         const cachedTrash = localStorage.getItem(`cached_trash_${user.id}`);
@@ -2367,7 +2913,6 @@ export default function App() {
         setRoutines(routinesData);
         setPrayerSettings(prayerData);
         setSchedules(schedulesData);
-
         if (timerData) {
           setTimerTotalSeconds(timerData.total_seconds);
           setTimerInitialMinutes(Math.floor(timerData.total_seconds / 60));
@@ -2547,8 +3092,11 @@ export default function App() {
     try {
       const days = parseInt(homePrintDays) || 7;
       
+      // Filter sessions based on toggle
+      const homeSessions = includeRoutineInHomePDF ? sessions : sessions.filter(s => !s.routine_id);
+      
       // Sort sessions by date ascending
-      const sortedSessions = [...sessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const sortedSessions = [...homeSessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       if (sortedSessions.length === 0) {
         setIsGeneratingHomePDF(false);
@@ -2569,22 +3117,47 @@ export default function App() {
 
       // Group sessions by date
       const groupedSessions: { [date: string]: StudySession[] } = {};
-      sessions.forEach(s => {
+      homeSessions.forEach(s => {
         const dateStr = s.date.includes('T') ? format(new Date(s.date), 'yyyy-MM-dd') : s.date;
         if (!groupedSessions[dateStr]) groupedSessions[dateStr] = [];
         groupedSessions[dateStr].push(s);
       });
 
-      // Chunk dates into pages (7 days per page to ensure it fits on A4 comfortably)
-      const daysPerPage = 7;
-      const dateChunks = [];
-      for (let i = 0; i < allDatesInRange.length; i += daysPerPage) {
-        dateChunks.push(allDatesInRange.slice(i, i + daysPerPage));
-      }
+      // Dynamic chunking to prevent page breaks cutting through rows
+      const dateChunks: string[][] = [];
+      let currentChunk: string[] = [];
+      let estimatedHeight = 0;
+      const maxHeight = 1050; // Safe limit for A4
+
+      allDatesInRange.forEach(dateStr => {
+        const daySessions = groupedSessions[dateStr] || [];
+        let dayHeight = 0;
+        
+        if (daySessions.length === 0) {
+          dayHeight = 100;
+        } else {
+          let sessionsHeight = 0;
+          daySessions.forEach(s => {
+            const topicsLineCount = s.topics ? s.topics.split('\n').length : 1;
+            sessionsHeight += 60 + (topicsLineCount * 22);
+          });
+          dayHeight = Math.max(sessionsHeight, 140);
+        }
+        
+        if (estimatedHeight + dayHeight > maxHeight && currentChunk.length > 0) {
+          dateChunks.push(currentChunk);
+          currentChunk = [dateStr];
+          estimatedHeight = 260 + dayHeight;
+        } else {
+          if (currentChunk.length === 0) estimatedHeight = 260; 
+          currentChunk.push(dateStr);
+          estimatedHeight += dayHeight;
+        }
+      });
+      if (currentChunk.length > 0) dateChunks.push(currentChunk);
 
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfPageHeight = pdf.internal.pageSize.getHeight();
       
       for (let i = 0; i < dateChunks.length; i++) {
         if (i > 0) pdf.addPage();
@@ -2595,41 +3168,61 @@ export default function App() {
         tempContainer.style.left = '-9999px';
         tempContainer.style.top = '0';
         tempContainer.style.width = '800px';
-        tempContainer.style.padding = '40px';
+        tempContainer.style.padding = '0';
         tempContainer.style.backgroundColor = '#ffffff';
         tempContainer.style.color = '#000000';
         tempContainer.style.fontFamily = '"Hind Siliguri", "Inter", sans-serif';
         
         let htmlContent = `
-          <div style="font-family: 'Hind Siliguri', sans-serif; color: #333; background-color: #fff;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #4F46E5; padding-bottom: 15px; margin-bottom: 20px;">
+          <div style="font-family: 'Hind Siliguri', 'Inter', sans-serif; color: #1e293b; background-color: #ffffff; padding: 30px 40px; width: 800px; display: flex; flex-direction: column; box-sizing: border-box;">
+            ${i === 0 ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #4f46e5; padding-bottom: 15px; margin-bottom: 15px;">
               <div>
-                <h1 style="font-size: 28px; color: #4F46E5; margin: 0; font-weight: bold;">Study Diary Report</h1>
-                <p style="font-size: 14px; color: #666; margin: 5px 0 0 0;">Page ${i + 1} of ${dateChunks.length} | ${days} Days Plan</p>
+                <h1 style="font-size: 34px; color: #4f46e5; margin: 0; font-weight: 900; letter-spacing: -0.04em; text-transform: uppercase;">Study Diary</h1>
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+                  <span style="font-size: 13px; color: #64748b; font-weight: 700; background: #f1f5f9; padding: 3px 10px; border-radius: 20px;">Page ${i + 1} of ${dateChunks.length}</span>
+                  <span style="font-size: 13px; color: #4f46e5; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">Personal Progress</span>
+                </div>
+              </div>
+              <div style="text-align: right; background: #f8fafc; padding: 12px 20px; border-radius: 20px; border: 1.5px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                <p style="font-size: 9px; color: #94a3b8; margin: 0; text-transform: uppercase; letter-spacing: 0.2em; font-weight: 800;">Exported Date</p>
+                <p style="font-size: 16px; color: #1e293b; font-weight: 900; margin: 2px 0 0 0;">${format(new Date(), 'MMM d, yyyy')}</p>
+              </div>
+            </div>
+            
+            <div style="margin-bottom: 20px; background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 15px 25px; border-radius: 20px; display: flex; align-items: center; justify-content: space-between; color: white; box-shadow: 0 8px 15px -5px rgba(79, 70, 229, 0.3);">
+              <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="background: rgba(255,255,255,0.15); padding: 8px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2);">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </div>
+                <div>
+                  <p style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; opacity: 0.9; margin: 0;">Report Duration</p>
+                  <p style="font-size: 18px; font-weight: 900; margin: 0;">${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d, yyyy')}</p>
+                </div>
               </div>
               <div style="text-align: right;">
-                <p style="font-size: 11px; color: #999; margin: 0; text-transform: uppercase; letter-spacing: 1px;">Generated on</p>
-                <p style="font-size: 14px; color: #444; font-weight: bold; margin: 0;">${format(new Date(), 'MMM d, yyyy HH:mm')}</p>
+                <p style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; opacity: 0.9; margin: 0;">Total Coverage</p>
+                <p style="font-size: 18px; font-weight: 900; margin: 0;">${days} Days</p>
               </div>
             </div>
-            
-            <div style="font-size: 14px; color: #444; margin-bottom: 25px; background-color: #f8fafc; padding: 12px 16px; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; align-items: center; gap: 10px;">
-              <span style="color: #4F46E5; font-weight: bold;">Report Period:</span>
-              <span>${format(startDate, 'MMM d, yyyy')}</span>
-              <span style="color: #cbd5e1;">&rarr;</span>
-              <span>${format(endDate, 'MMM d, yyyy')}</span>
+            ` : `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; margin-bottom: 15px;">
+              <span style="font-size: 12px; color: #64748b; font-weight: 700;">Page ${i + 1} of ${dateChunks.length}</span>
+              <span style="font-size: 12px; color: #4f46e5; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">Study Diary Continued</span>
             </div>
+            `}
             
-            <table style="width: 100%; border-collapse: collapse; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0;">
-              <thead>
-                <tr style="background-color: #4F46E5; color: #ffffff;">
-                  <th style="padding: 14px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Date</th>
-                  <th style="padding: 14px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Subject</th>
-                  <th style="padding: 14px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Chapter</th>
-                  <th style="padding: 14px 12px; text-align: center; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Status</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div>
+              <table style="width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 24px; overflow: hidden; border: 1.5px solid #e2e8f0; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);">
+                <thead>
+                  <tr style="background-color: #4f46e5; color: #ffffff;">
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">DATE</th>
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Subject & Chapter</th>
+                    <th style="padding: 15px 20px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900; border-right: 1px solid rgba(255,255,255,0.1);">Topics Covered</th>
+                    <th style="padding: 15px 20px; text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 900;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
         `;
         
         chunk.forEach((dateStr, idx) => {
@@ -2638,34 +3231,40 @@ export default function App() {
           const rowBg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
 
           if (daySessions.length === 0) {
-            // Empty day row
             htmlContent += `
               <tr style="background-color: ${rowBg};">
-                <td style="padding: 14px 12px; border-bottom: ${isLastDate ? 'none' : '1px solid #e2e8f0'}; border-right: 1px solid #e2e8f0; vertical-align: top; width: 130px;">
-                  <div style="font-weight: 800; color: #1e293b; font-size: 15px;">${format(new Date(dateStr), 'MMM d')}</div>
-                  <div style="font-size: 11px; color: #64748b; margin-top: 2px; font-weight: 500;">${format(new Date(dateStr), 'EEEE')}</div>
+                <td style="padding: 25px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; border-right: 1.5px solid #f1f5f9; vertical-align: top; width: 140px;">
+                  <div style="font-weight: 900; color: #1e293b; font-size: 18px;">${format(new Date(dateStr), 'MMM d')}</div>
+                  <div style="font-size: 12px; color: #64748b; margin-top: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">${format(new Date(dateStr), 'EEEE')}</div>
                 </td>
-                <td colspan="3" style="padding: 14px 12px; border-bottom: ${isLastDate ? 'none' : '1px solid #e2e8f0'}; color: #94a3b8; font-style: italic; font-size: 13px; text-align: center; border-right: 1px solid #e2e8f0;">No tasks recorded for this day</td>
+                <td colspan="3" style="padding: 25px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; color: #94a3b8; font-style: italic; font-size: 15px; text-align: center; letter-spacing: 0.03em; font-weight: 500;">No sessions recorded</td>
               </tr>
             `;
           } else {
             daySessions.forEach((s, sIdx) => {
               const isLastSession = sIdx === daySessions.length - 1;
-              const borderBottom = (isLastDate && isLastSession) ? 'none' : '1px solid #e2e8f0';
+              const borderBottom = (isLastDate && isLastSession) ? 'none' : '1.5px solid #f1f5f9';
 
               htmlContent += `
                 <tr style="background-color: ${rowBg};">
                   ${sIdx === 0 ? `
-                    <td style="padding: 14px 12px; border-bottom: ${isLastDate ? 'none' : '1px solid #e2e8f0'}; border-right: 1px solid #e2e8f0; vertical-align: top; width: 130px;" rowspan="${daySessions.length}">
-                      <div style="font-weight: 800; color: #1e293b; font-size: 15px;">${format(new Date(dateStr), 'MMM d')}</div>
-                      <div style="font-size: 11px; color: #64748b; margin-top: 2px; font-weight: 500;">${format(new Date(dateStr), 'EEEE')}</div>
+                    <td style="padding: 30px 20px; border-bottom: ${isLastDate ? 'none' : '1.5px solid #f1f5f9'}; border-right: 1.5px solid #f1f5f9; vertical-align: top; width: 140px;" rowspan="${daySessions.length}">
+                      <div style="font-weight: 900; color: #1e293b; font-size: 20px; line-height: 1;">${format(new Date(dateStr), 'MMM d')}</div>
+                      <div style="font-size: 12px; color: #64748b; margin-top: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2;">${format(new Date(dateStr), 'EEEE')}</div>
                     </td>
                   ` : ''}
-                  <td style="padding: 14px 12px; border-bottom: ${borderBottom}; border-right: 1px solid #e2e8f0; color: #4F46E5; font-weight: 700; font-size: 14px;">${s.subject}</td>
-                  <td style="padding: 14px 12px; border-bottom: ${borderBottom}; border-right: 1px solid #e2e8f0; color: #334155; font-size: 13px; font-weight: 500;">${s.chapter}</td>
-                  <td style="padding: 14px 12px; border-bottom: ${borderBottom}; border-right: 1px solid #e2e8f0; text-align: center; width: 110px;">
-                    <div style="display: inline-block; padding: 6px 10px; border-radius: 8px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; ${s.completed ? 'background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0;' : 'background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca;'}">
-                      ${s.completed ? 'Done' : 'Pending'}
+                  <td style="padding: 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; vertical-align: top;">
+                    <div style="color: #4f46e5; font-weight: 900; font-size: 16px; line-height: 1.2;">${s.subject}</div>
+                    <div style="margin-top: 8px; color: #475569; font-size: 13px; font-weight: 700;">Chapter: ${s.chapter}</div>
+                  </td>
+                  <td style="padding: 20px; border-bottom: ${borderBottom}; border-right: 1.5px solid #f1f5f9; vertical-align: top;">
+                    <div style="color: #1e293b; font-size: 14px; line-height: 1.6; font-weight: 600;">
+                      ${s.topics ? s.topics.split('\n').map(t => `<div style="margin-bottom: 6px; display: flex; gap: 8px;"><span style="color: #4f46e5; font-weight: 900;">&bull;</span><span>${t}</span></div>`).join('') : '<span style="color: #cbd5e1; font-style: italic;">No topics specified</span>'}
+                    </div>
+                  </td>
+                  <td style="padding: 20px; border-bottom: ${borderBottom}; text-align: center; vertical-align: middle;">
+                    <div style="display: inline-block; padding: 8px 16px; border-radius: 12px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; ${s.completed ? 'background-color: #ecfdf5; color: #065f46; border: 2px solid #a7f3d0;' : 'background-color: #fff1f2; color: #9f1239; border: 2px solid #fecdd3;'}">
+                      ${s.completed ? 'COMPLETED' : 'PENDING'}
                     </div>
                   </td>
                 </tr>
@@ -2675,20 +3274,8 @@ export default function App() {
         });
         
         htmlContent += `
-              </tbody>
-            </table>
-            <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
-              <p style="font-size: 10px; color: #94a3b8; margin: 0;">&copy; ${new Date().getFullYear()} Study Planner - Professional Diary Export</p>
-              <div style="display: flex; gap: 15px;">
-                <div style="display: flex; align-items: center; gap: 5px;">
-                  <div style="width: 8px; height: 8px; border-radius: 2px; background-color: #dcfce7; border: 1px solid #bbf7d0;"></div>
-                  <span style="font-size: 9px; color: #64748b; font-weight: 600;">Completed</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 5px;">
-                  <div style="width: 8px; height: 8px; border-radius: 2px; background-color: #fee2e2; border: 1px solid #fecaca;"></div>
-                  <span style="font-size: 9px; color: #64748b; font-weight: 600;">Pending</span>
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
           </div>
         `;
@@ -2699,33 +3286,21 @@ export default function App() {
         await document.fonts.ready;
 
         const canvas = await html2canvas(tempContainer, {
-          scale: 2,
+          scale: 4,
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
+          windowWidth: 800,
         });
         
         document.body.removeChild(tempContainer);
         
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const imgProps = pdf.getImageProperties(imgData);
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
         const pdfPageHeight = pdf.internal.pageSize.getHeight();
+        const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
         
-        let heightLeft = pdfHeight;
-        let position = 0;
-
-        // Add the first page for this chunk
-        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
-        heightLeft -= pdfPageHeight;
-
-        // If the chunk overflows the page, add more pages
-        while (heightLeft > 0) {
-          position = heightLeft - pdfHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
-          heightLeft -= pdfPageHeight;
-        }
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeight);
       }
 
       if (Capacitor.isNativePlatform()) {
@@ -2852,6 +3427,15 @@ export default function App() {
 
   return (
     <div className="h-full h-[100dvh] bg-background flex flex-col md:flex-row w-full max-w-full overflow-hidden border-none">
+      <FlaskModal 
+        isOpen={isFlaskModalOpen} 
+        onClose={() => setIsFlaskModalOpen(false)} 
+        focusTime={getTodayFocusTime()} 
+        isFocusActive={isFocusActive}
+        darkMode={settings.dark_mode}
+        goalHours={flaskGoalHours}
+        onSetGoal={setFlaskGoalHours}
+      />
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-64 flex-col bg-card border-none md:border-r border-white/5 light:border-gray-200 p-6 fixed h-full z-50 transition-colors shadow-2xl shadow-black/20">
         <div className="mb-12 px-2">
@@ -2884,13 +3468,21 @@ export default function App() {
         <motion.div 
           onPanEnd={(_, info) => {
             const swipeThreshold = 50;
-            const velocityThreshold = 0.2;
-            if (Math.abs(info.offset.x) > swipeThreshold && Math.abs(info.offset.x) > Math.abs(info.offset.y)) {
-              if (info.offset.x > 0) handleSwipe('left');
-              else handleSwipe('right');
+            const velocityThreshold = 0.5;
+            
+            if (Math.abs(info.offset.x) > swipeThreshold || Math.abs(info.velocity.x) > velocityThreshold) {
+              if (Math.abs(info.offset.x) > Math.abs(info.offset.y)) {
+                if (info.offset.x > 0) {
+                  // Finger moved left to right -> Swipe Right
+                  handleSwipe('right');
+                } else {
+                  // Finger moved right to left -> Swipe Left
+                  handleSwipe('left');
+                }
+              }
             }
           }}
-          className="min-h-full w-full"
+          className="min-h-full w-full touch-pan-y"
         >
           <div className="max-w-5xl mx-auto w-full pb-32 md:pb-8">
             <AnimatePresence mode="wait">
@@ -2909,14 +3501,75 @@ export default function App() {
                       <div className="flex flex-col">
                         <h1 className="text-5xl md:text-7xl font-black tracking-tighter text-primary drop-shadow-[0_0_15px_rgba(88,86,214,0.3)]">
                           {format(currentTime, 'hh:mm')}
-                          <span className="text-xl md:text-2xl ml-3 opacity-40 font-bold tracking-widest">{format(currentTime, 'a')}</span>
                         </h1>
-                        <p className="text-xs md:text-sm font-black text-gray-400 uppercase tracking-[0.4em] mt-2 opacity-60">
-                          {format(currentTime, 'MMMM d, yyyy')}
+                        <p className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-[0.2em] mt-1 opacity-60">
+                          {format(currentTime, 'd MMMM yyyy')}
                         </p>
+                        {/* Ultra-Minimalist Transparent Study Focus UI */}
+                        <motion.div 
+                          onMouseDown={startLongPress}
+                          onMouseUp={endLongPress}
+                          onMouseLeave={endLongPress}
+                          onTouchStart={startLongPress}
+                          onTouchEnd={(e) => {
+                            endLongPress();
+                          }}
+                          onClick={() => {
+                            if (!isLongPressDetected.current) {
+                              toggleFocus();
+                            }
+                            isLongPressDetected.current = false;
+                          }}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          className={cn(
+                            "mt-4 group relative cursor-pointer flex items-center gap-2 px-4 py-2 transition-all duration-300 max-w-max select-none touch-none rounded-xl",
+                            isFocusActive 
+                              ? "bg-primary/10 backdrop-blur-md border border-primary/30 opacity-100" 
+                              : "bg-transparent border border-transparent opacity-80 hover:opacity-100"
+                          )}
+                          style={{ WebkitTouchCallout: 'none', userSelect: 'none' }}
+                        >
+                          <div className="flex items-center gap-1.5 relative z-10 font-mono tracking-tighter">
+                            {(() => {
+                              const rawSeconds = getTodayFocusTime();
+                              const seconds = (typeof rawSeconds === 'number' && !isNaN(rawSeconds)) ? rawSeconds : 0;
+                              const h = Math.floor(seconds / 3600);
+                              const m = Math.floor((seconds % 3600) / 60);
+                              const s = seconds % 60;
+                              
+                              const renderPart = (val: number, label: string) => {
+                                const safeVal = isNaN(val) ? 0 : val;
+                                return (
+                                  <div className="flex items-baseline">
+                                    <span className={cn(
+                                      "text-lg font-black tabular-nums",
+                                      isFocusActive ? "text-primary" : "text-gray-300"
+                                    )}>{safeVal.toString().padStart(2, '0')}</span>
+                                    <span className="text-[8px] font-black ml-0.5 opacity-60 uppercase text-gray-400">{label}</span>
+                                  </div>
+                                );
+                              };
+
+                              return (
+                                <>
+                                  {h > 0 && (
+                                    <>
+                                      {renderPart(h, 'h')}
+                                      <span className="mx-0.5 font-bold opacity-20 text-gray-400">:</span>
+                                    </>
+                                  )}
+                                  {renderPart(m, 'm')}
+                                  <span className="mx-0.5 font-bold opacity-20 text-gray-400">:</span>
+                                  {renderPart(s, 's')}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </motion.div>
                       </div>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 items-center">
                       <button 
                         onClick={() => setIsFullCalendarOpen(true)}
                         className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-card rounded-2xl md:rounded-full border border-white/5 light:border-gray-200 text-primary hover:bg-white/10 light:hover:bg-gray-100 transition-all shadow-xl shadow-primary/5 active:scale-95"
@@ -3221,14 +3874,14 @@ export default function App() {
                         <Calendar size={20} className="text-indigo-500" />
                       </div>
                       <div>
-                        <h3 className="font-black text-foreground uppercase tracking-wider text-sm">3-Day Schedule</h3>
+                        <h3 className="font-black text-foreground uppercase tracking-wider text-sm">7-Day Schedule</h3>
                         <p className="text-xs text-gray-500 font-bold">Upcoming routines</p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {[0, 1, 2].map((offset) => {
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
+                    {[0, 1, 2, 3, 4, 5, 6].map((offset) => {
                       const day = addDays(startOfDay(new Date()), offset);
                       const dateStr = format(day, 'yyyy-MM-dd');
                       const dayRoutines = routines.filter(r => {
@@ -3283,6 +3936,107 @@ export default function App() {
                   </div>
                 </Card>
 
+                <div className="grid grid-cols-1 gap-6">
+                  {/* Study Focus Feature */}
+                  <Card className="p-6 hover:bg-white/[0.02] transition-colors">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                          <Clock size={20} className="text-indigo-500" />
+                        </div>
+                        <div>
+                          <h3 className="font-black text-foreground uppercase tracking-wider text-sm">Study Focus</h3>
+                          <p className="text-xs text-gray-500 font-bold">Time spent focused on learning</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
+                        <button 
+                          onClick={() => setFocusRange(7)}
+                          className={cn(
+                            "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                            focusRange === 7 ? "bg-primary text-white shadow-lg" : "text-gray-500 hover:text-gray-300"
+                          )}
+                        >
+                          7 Days
+                        </button>
+                        <button 
+                          onClick={() => setFocusRange(30)}
+                          className={cn(
+                            "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                            focusRange === 30 ? "bg-primary text-white shadow-lg" : "text-gray-500 hover:text-gray-300"
+                          )}
+                        >
+                          30 Days
+                        </button>
+                        <button 
+                          onClick={() => setFocusRange(365)}
+                          className={cn(
+                            "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                            focusRange === 365 ? "bg-primary text-white shadow-lg" : "text-gray-500 hover:text-gray-300"
+                          )}
+                        >
+                          1 Year
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="h-64 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={generateFocusChartData()}>
+                          <defs>
+                            <linearGradient id="focusGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke={settings.dark_mode ? "#ffffff05" : "#00000005"} vertical={false} />
+                          <XAxis 
+                            dataKey="name" 
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 10, fontWeight: 800 }}
+                            dy={10}
+                            interval={focusRange === 365 ? 60 : (focusRange === 30 ? 4 : 0)}
+                          />
+                          <YAxis 
+                            axisLine={false}
+                            tickLine={false}
+                            allowDecimals={false}
+                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 10, fontWeight: 800 }}
+                            tickFormatter={(val) => `${Math.round(val)}h`}
+                          />
+                          <Tooltip 
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className={cn(
+                                    "border p-4 rounded-2xl shadow-2xl backdrop-blur-xl",
+                                    settings.dark_mode ? "bg-[#161B22]/90 border-white/10" : "bg-white/90 border-gray-200"
+                                  )}>
+                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">{data.name}</p>
+                                    <p className="text-lg font-black text-primary">{formatFocusTime(data.rawSeconds)}</p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="hours" 
+                            stroke="#6366f1" 
+                            strokeWidth={3}
+                            fillOpacity={1} 
+                            fill="url(#focusGradient)" 
+                            animationDuration={1500}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </Card>
+                </div>
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <Card className="lg:col-span-2 p-6 hover:bg-white/[0.02] light:hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setDetailModalData({ type: 'trend', data: { title: 'Activity Trends' } })}>
                     <div className="flex items-center justify-between mb-8">
@@ -3313,16 +4067,12 @@ export default function App() {
                       </div>
                     </div>
                     <div className="h-72 w-full relative">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <ComposedChart data={generateChartData(sessions)}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={generateChartData(sessions)} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                           <defs>
-                            <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#5856D6" stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor="#5856D6" stopOpacity={0}/>
-                            </linearGradient>
-                            <linearGradient id="colorIncomplete" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#F43F5E" stopOpacity={0.2}/>
-                              <stop offset="95%" stopColor="#F43F5E" stopOpacity={0}/>
+                            <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#5856D6" stopOpacity={1} />
+                              <stop offset="100%" stopColor="#5856D6" stopOpacity={0.6} />
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke={settings.dark_mode ? "#ffffff05" : "#00000005"} vertical={false} />
@@ -3330,39 +4080,44 @@ export default function App() {
                             dataKey="name" 
                             axisLine={false}
                             tickLine={false}
-                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 10, fontWeight: 800 }}
+                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 11, fontWeight: 800 }}
                             dy={10}
                           />
-                          <YAxis hide />
+                          <YAxis 
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: settings.dark_mode ? '#4B5563' : '#9CA3AF', fontSize: 10, fontWeight: 800 }}
+                          />
                           <Tooltip 
-                            cursor={{ stroke: settings.dark_mode ? '#ffffff10' : '#00000010', strokeWidth: 2 }}
+                            cursor={{ fill: settings.dark_mode ? '#ffffff05' : '#00000005', radius: [10, 10, 0, 0] }}
                             content={({ active, payload }) => {
                               if (active && payload && payload.length) {
+                                const data = payload[0].payload;
                                 return (
                                   <div className={cn(
                                     "border p-4 rounded-2xl shadow-2xl backdrop-blur-xl",
                                     settings.dark_mode ? "bg-[#161B22]/90 border-white/10" : "bg-white/90 border-gray-200"
                                   )}>
-                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">{payload[0].payload.name}</p>
+                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">{data.name}</p>
                                     <div className="space-y-3">
                                       <div className="flex items-center justify-between gap-12">
                                         <div className="flex items-center gap-2">
                                           <div className="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_8px_rgba(88,86,214,0.5)]" />
                                           <span className="text-xs font-bold text-gray-400">Completed</span>
                                         </div>
-                                        <span className="text-sm font-black text-foreground">{payload[0].value}</span>
+                                        <span className="text-sm font-black text-foreground">{data.completed}</span>
                                       </div>
                                       <div className="flex items-center justify-between gap-12">
                                         <div className="flex items-center gap-2">
                                           <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />
                                           <span className="text-xs font-bold text-gray-400">Incomplete</span>
                                         </div>
-                                        <span className="text-sm font-black text-foreground">{payload[1].value}</span>
+                                        <span className="text-sm font-black text-foreground">{data.incomplete}</span>
                                       </div>
                                       <div className="pt-2 border-t border-white/5 mt-2 flex justify-between items-center">
                                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Efficiency</span>
                                         <span className="text-xs font-black text-primary">
-                                          {payload[0].payload.total > 0 ? Math.round((payload[0].value / payload[0].payload.total) * 100) : 0}%
+                                          {data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0}%
                                         </span>
                                       </div>
                                     </div>
@@ -3372,33 +4127,23 @@ export default function App() {
                               return null;
                             }}
                           />
-                          <Area 
-                            type="monotone" 
+                          <Bar 
                             dataKey="completed" 
-                            stroke="#5856D6" 
-                            strokeWidth={4}
-                            fillOpacity={1} 
-                            fill="url(#colorCompleted)" 
-                            animationDuration={2000}
+                            stackId="a" 
+                            fill="url(#barGradient)" 
+                            radius={[0, 0, 0, 0]} 
+                            barSize={32}
+                            animationDuration={1500}
                           />
-                          <Area 
-                            type="monotone" 
+                          <Bar 
                             dataKey="incomplete" 
-                            stroke="#F43F5E" 
-                            strokeWidth={3}
-                            fillOpacity={1} 
-                            fill="url(#colorIncomplete)" 
-                            animationDuration={2000}
+                            stackId="a" 
+                            fill={settings.dark_mode ? "#F43F5E30" : "#F43F5E20"} 
+                            radius={[10, 10, 0, 0]} 
+                            barSize={32}
+                            animationDuration={1500}
                           />
-                          <Line 
-                            type="monotone" 
-                            dataKey="completed" 
-                            stroke="#5856D6" 
-                            strokeWidth={0}
-                            dot={{ r: 4, fill: '#5856D6', strokeWidth: 2, stroke: settings.dark_mode ? '#161B22' : '#fff' }}
-                            activeDot={{ r: 6, fill: '#5856D6', strokeWidth: 0 }}
-                          />
-                        </ComposedChart>
+                        </BarChart>
                       </ResponsiveContainer>
                     </div>
                   </Card>
@@ -4107,6 +4852,22 @@ export default function App() {
                                   )}
                                   placeholder="e.g. 7"
                                 />
+                              </div>
+
+                              <div className="flex items-center justify-between py-1">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Include Routine</span>
+                                <button
+                                  onClick={() => setIncludeRoutineInHomePDF(!includeRoutineInHomePDF)}
+                                  className={cn(
+                                    "w-8 h-4 rounded-full transition-colors relative",
+                                    includeRoutineInHomePDF ? "bg-indigo-500" : "bg-slate-300"
+                                  )}
+                                >
+                                  <div className={cn(
+                                    "absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform duration-200 ease-in-out",
+                                    includeRoutineInHomePDF ? "translate-x-4" : "translate-x-0"
+                                  )} />
+                                </button>
                               </div>
 
                               <button
@@ -4982,7 +5743,7 @@ const TaskItem = React.memo(({ session, onToggle, onDelete, onEdit, onClick, isE
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-2 h-2 rounded-full shadow-[0_0_10px_currentColor]" style={{ backgroundColor: session.color, color: session.color }} />
-                  <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em]">Session Insights</p>
+                  <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em]">Topics</p>
                 </div>
                 <div className={cn(
                   "h-[1px] flex-1 mx-6 bg-gradient-to-r to-transparent",

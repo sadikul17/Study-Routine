@@ -50,6 +50,18 @@ export interface TimerState {
   last_saved_at: number;
 }
 
+export interface StudyTimerState {
+  seconds: number;
+  is_running: boolean;
+  last_started_at: number | null;
+  last_saved_at: number | null;
+  last_updated_at: string; // YYYY-MM-DD
+}
+
+export interface StudyHistory {
+  [date: string]: number; // date -> seconds
+}
+
 export interface AppSettings {
   language: 'en' | 'bn';
   dark_mode: boolean;
@@ -837,6 +849,128 @@ export const storage = {
       }
     }
   },
+  getStudyTimer: async (userId: string): Promise<StudyTimerState | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('type', 'study_timer')
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error;
+      
+      if (data) {
+        localStorage.setItem(`cached_study_timer_${userId}`, JSON.stringify(data.settings));
+        return data.settings as StudyTimerState;
+      }
+      return null;
+    } catch (error) {
+      const cached = localStorage.getItem(`cached_study_timer_${userId}`);
+      return cached ? JSON.parse(cached) : null;
+    }
+  },
+  saveStudyTimer: async (userId: string, timer: StudyTimerState) => {
+    localStorage.setItem(`cached_study_timer_${userId}`, JSON.stringify(timer));
+    if (!userId || userId === 'guest_user') return;
+    try {
+      await supabase.from('settings').upsert({ user_id: userId, type: 'study_timer', settings: timer }, { onConflict: 'user_id,type' });
+    } catch (err) {
+      console.error('Error saving study timer:', err);
+    }
+  },
+  getStudyHistory: async (userId: string): Promise<StudyHistory> => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('type', 'study_history')
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error;
+      
+      if (data) {
+        localStorage.setItem(`cached_study_history_${userId}`, JSON.stringify(data.settings));
+        return data.settings as StudyHistory;
+      }
+      return {};
+    } catch (error) {
+      const cached = localStorage.getItem(`cached_study_history_${userId}`);
+      return cached ? JSON.parse(cached) : {};
+    }
+  },
+  saveStudyHistory: async (userId: string, history: StudyHistory) => {
+    localStorage.setItem(`cached_study_history_${userId}`, JSON.stringify(history));
+    if (!userId || userId === 'guest_user') return;
+    try {
+      await supabase.from('settings').upsert({ user_id: userId, type: 'study_history', settings: history }, { onConflict: 'user_id,type' });
+    } catch (err) {
+      console.error('Error saving study history:', err);
+    }
+  },
+  getFocusTime: async (userId: string): Promise<StudyHistory> => {
+    try {
+      const { data, error } = await supabase
+        .from('study_focus')
+        .select('date, seconds')
+        .eq('user_id', userId);
+      
+      if (error) throw error;
+      
+      const focusData: StudyHistory = {};
+      data.forEach((row: any) => {
+        focusData[row.date] = row.seconds;
+      });
+      
+      localStorage.setItem(`cached_focus_time_${userId}`, JSON.stringify(focusData));
+      return focusData;
+    } catch (error) {
+      console.warn('Offline mode or query error (FocusTime):', error);
+      const cached = localStorage.getItem(`cached_focus_time_${userId}`);
+      return safeParse(cached, {});
+    }
+  },
+  saveFocusTime: async (userId: string, date: string, seconds: number) => {
+    // 1. Update local cache
+    const cacheKey = `cached_focus_time_${userId}`;
+    const cached = safeParse(localStorage.getItem(cacheKey), {});
+    cached[date] = seconds;
+    localStorage.setItem(cacheKey, JSON.stringify(cached));
+    
+    // 2. Add to pending sync
+    const pendingKey = `pending_sync_${userId}`;
+    const pending = safeParse(localStorage.getItem(pendingKey), []);
+    
+    // Update existing pending save for this date if it exists
+    const existingIndex = pending.findIndex((p: any) => p.type === 'save_focus_time' && p.data?.date === date);
+    let newPending;
+    if (existingIndex !== -1) {
+      newPending = [...pending];
+      newPending[existingIndex] = { type: 'save_focus_time', data: { date, seconds } };
+    } else {
+      newPending = [...pending, { type: 'save_focus_time', data: { date, seconds } }];
+    }
+    localStorage.setItem(pendingKey, JSON.stringify(newPending));
+
+    if (!userId || userId === 'guest_user') return;
+
+    try {
+      // 3. Save to Supabase
+      const { error } = await supabase
+        .from('study_focus')
+        .upsert({ user_id: userId, date, seconds }, { onConflict: 'user_id,date' });
+      
+      if (error) throw error;
+      
+      // Remove from pending if successful
+      const updatedPending = safeParse(localStorage.getItem(pendingKey), [])
+        .filter((p: any) => !(p.type === 'save_focus_time' && p.data?.date === date));
+      localStorage.setItem(pendingKey, JSON.stringify(updatedPending));
+    } catch (err) {
+      console.error('Error saving focus time to Supabase:', err);
+    }
+  },
   getProfile: async (userId: string): Promise<UserProfile> => {
     console.log('[Storage] Fetching profile for user:', userId);
     try {
@@ -984,6 +1118,9 @@ export const storage = {
           ({ error } = await supabase.from('settings').upsert({ user_id: userId, type: 'schedules', settings: change.data }, { onConflict: 'user_id,type' }));
         } else if (change.type === 'save_profile') {
           ({ error } = await supabase.from('profiles').upsert({ ...change.data, user_id: userId }, { onConflict: 'user_id' }));
+        } else if (change.type === 'save_focus_time') {
+          const { date, seconds } = change.data;
+          ({ error } = await supabase.from('study_focus').upsert({ user_id: userId, date, seconds }, { onConflict: 'user_id,date' }));
         }
         
         if (!error) {
